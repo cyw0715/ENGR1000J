@@ -1,0 +1,7 @@
+dependencies:
+  idf: ">=5.4"
+  # P4 + C6 SDIO stack pinned to the previously stable local combination.
+  # New esp_hosted 2.12.11 asserted during early Hosted task creation on this board.
+  espressif/esp_hosted: "1.4.7"
+  espressif/esp_wifi_remote: "0.14.5"
+  espressif/usb_host_ch34x_vcp: "2.2.1"
