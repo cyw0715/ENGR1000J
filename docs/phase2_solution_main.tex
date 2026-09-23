@@ -1,0 +1,798 @@
+\documentclass{engr1000j-s2}
+
+\usepackage{tabularx}
+\usepackage{lastpage}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumitem}
+
+\usepackage{tocloft}
+
+% spacing between numbering and title
+\renewcommand{\cftsecaftersnum}{\hspace{1em}}
+\renewcommand{\cftsubsecaftersnum}{\hspace{1em}}
+\renewcommand{\cftsubsubsecaftersnum}{\hspace{1em}}
+
+% indentation for hierarchy
+\setlength{\cftsecindent}{0em}
+\setlength{\cftsubsecindent}{2em}
+\setlength{\cftsubsubsecindent}{4em}
+
+% dot spacing
+\renewcommand{\cftdotsep}{1}
+
+\hypersetup{
+  hidelinks,
+  pdftitle={Mars Explorer Phase Two Report},
+  pdfauthor={Group 5: Six Gentlemen}
+}
+
+\lstdefinestyle{appendixcode}{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  xleftmargin=0pt,
+  xrightmargin=0pt
+}
+
+\newcommand{\statusdone}{\textbf{Completed}}
+\newcommand{\statusprogress}{\textbf{In Progress}}
+\newcommand{\statusplanned}{\textbf{Planned}}
+
+\begin{document}
+
+  \includegraphics[height=0.75in]{figures/gc_logo.png}
+  \newline
+  \newline
+  \textbf{\Large ENGR1000J Introduction to Engineering, Summer 2026}\\[0.5em]
+  \textbf{{\Large 2026.08.08}}
+
+  \begin{center}
+    \begin{minipage}{0.45\textwidth}
+      \includegraphics[height=0.8in]{figures/team logo.png}
+    \end{minipage}\hfill
+    \begin{minipage}{0.45\textwidth}
+      \textbf{\Large Group 5: Six Gentlemen}
+    \end{minipage}\\[0.2em]
+  \end{center}
+
+  \noindent
+  {\color{gray!30}\rule{\textwidth}{0.1pt}}
+
+  {\Huge Self-Stabilizing Landing Platform}
+
+  \begin{center}
+    \includegraphics[height=3.5in]{figures/final prototype.jpg}
+  \end{center}
+
+  \hspace{1em}
+
+  {\Large
+  Chen Yuewei\par\vspace{-10pt}
+  Sun Andong\par\vspace{-10pt}
+  Sun Yongjian\par\vspace{-10pt}
+  Cui Yukun\par\vspace{-10pt}
+  Ding Junyuan\par\vspace{-10pt}
+  Ge Chengzhi\par\vspace{-10pt}
+  }
+
+  \newpage
+  \pagestyle{mystyle}
+
+ \section{Abstract}
+  \phantomsection
+
+Reliable landing is essential for planetary exploration because an inclined landing platform may reduce antenna alignment, decrease solar-panel efficiency, and create unstable conditions for rover deployment. Rough and uneven Martian terrain can cause the landing legs to contact the surface at different heights, leaving the platform tilted even after a safe touchdown. This project aimed to develop a self-stabilizing landing platform that could actively correct its attitude after landing and provide a more stable base for subsequent mission operations. The proposed prototype used a four-leg aluminum structure with independently adjustable linear actuators. An OV5647 camera was used for terrain imaging, a BNO085 inertial measurement unit measured the platform attitude, and four VL53L0X time-of-flight sensors monitored the extension of the landing legs. An ESP32-P4 and ESP-C6 processing unit calculated the required leg-length adjustments, while an Arduino Mega 2560 controlled the actuators through the motor-driving system. After touchdown, the platform measured its inclination and leg positions, determined which legs required extension or retraction, and repeatedly performed sensing, calculation, and actuation until the residual tilt was reduced. Physical testing showed that the prototype achieved an average final tilt angle of \(2.61^\circ\), below the design limit of \(5.0^\circ\). It also maintained a descent speed of \(5.2~\mathrm{cm/s}\), supported a payload of at least \(16~\mathrm{kg}\), and completed 19 of 20 trials successfully, corresponding to a success rate of \(95\%\). These results demonstrate that independent leg adjustment combined with closed-loop feedback can effectively reduce terrain-induced platform inclination. Although the current prototype was tested only under Earth-based laboratory conditions, the project verified the feasibility of active post-touchdown leveling. Further development of this technology could improve the reliability of planetary landers, protect onboard instruments, support safer rover deployment, and enable future exploration missions to operate on a wider range of uneven terrain.
+
+
+
+
+
+\hspace{1em}
+
+\section{Acknowledgments}
+\phantomsection
+
+  
+The team would like to thank the ENGR1000J instructors, teaching assistants, and course support staff for their guidance throughout Phase Two. Their lectures, laboratory sessions, office-hour feedback, and project regulations provided the technical framework for the design, fabrication, testing, and reporting process.
+
+The team also acknowledges the use of Codex and Gemini as writing and formatting assistance tools, and Image2 and Nano Banana as AI image-generation tools. Codex and Gemini were used to help organize report sections, refine English wording, structure LaTeX tables, and check whether report requirements were clearly represented. Image2 and Nano Banana were used to support image generation for report visuals. All technical claims, design descriptions, material choices, generated images, and test results were reviewed and confirmed by the team before inclusion in the final report.
+
+  \newpage
+  \tableofcontents
+  \thispagestyle{mystyle}
+  \newpage
+
+\section{Problem}
+\label{sec:problem}
+
+The surface of Mars presents a major challenge to the safe landing and subsequent operation of robotic exploration systems. Martian terrain contains rocks, slopes, depressions, loose soil, and other irregular surface features. Observations from NASA's surface missions show that steep slopes, rocks, and sand can significantly restrict robotic operations and require mission teams to avoid hazardous regions \cite{nasa_curiosity_climb}. At the scale of a landing platform, these irregularities may cause its supporting legs to contact the surface at different elevations. Consequently, a spacecraft may complete its descent without structural damage but remain tilted after touchdown.
+
+Platform inclination can affect several important mission functions. Communication antennas and solar panels depend on suitable orientation to achieve effective signal transmission and power generation. A tilted deck may also reduce the stability of scientific instruments and create unsafe conditions for rover release. These consequences are especially important because planetary missions operate with limited energy, restricted communication opportunities, and little possibility of physical repair. A landing attitude that would be only a minor inconvenience on Earth may therefore reduce scientific return or threaten the operation of an entire Mars mission.
+
+Terrain slope is already treated as an important engineering constraint during landing-site evaluation. NASA's engineering guidance for the Mars Science Laboratory classified surface slopes below \(5^\circ\) as low, slopes between \(5^\circ\) and \(15^\circ\) as moderate, and slopes above \(15^\circ\) as high \cite{msl_engineering_guide}. This classification demonstrates that relatively small differences in surface geometry can influence landing and surface-operation decisions. However, orbital images and pre-landing measurements cannot always identify every rock or height variation beneath an individual landing leg. Even a region considered generally safe may therefore produce unequal contact conditions at the final touchdown points.
+
+Previous engineering approaches have addressed parts of this problem. Passive landing structures and shock absorbers can reduce touchdown impact and protect the lander from excessive loads \cite{pham2013}. More recent missions have also used hazard-detection and terrain-relative navigation technologies. For example, the Mars 2020 landing system compared descent images with stored terrain maps and could redirect the vehicle toward a safer area \cite{nasa_trn2020}. Lidar-based hazard-detection systems have similarly been investigated for planetary landing applications \cite{huang2024}. These methods improve landing safety by reducing impact or avoiding major hazards before touchdown.
+
+Nevertheless, these approaches do not completely address the remaining static inclination after ground contact. Passive dampers absorb energy but do not normally correct unequal final support heights. Pre-landing hazard avoidance selects a safer region, but its effectiveness is limited by sensing resolution, landing-position uncertainty, and small local surface features. The unresolved problem therefore affects spacecraft designers, mission operators, scientific payload teams, and rover-deployment systems: a lander may survive touchdown but still lack a sufficiently stable and level operating platform.
+
+\medskip
+\noindent\textbf{In summary, the most important unresolved problems are:}
+
+\begin{enumerate}
+    \item Unequal landing-leg contact heights caused by rocks, slopes, and surface depressions;
+    \item Residual platform tilt that may reduce communication, power generation, instrument stability, and rover-deployment safety;
+    \item Limited ability of passive landing systems to correct static inclination after touchdown;
+    \item Incomplete protection from small terrain variations despite pre-landing hazard detection and landing-site selection.
+\end{enumerate}
+
+
+
+\section{Needs}
+\label{sec:needs}
+
+To address the problems caused by uneven landing-leg contact and residual platform tilt, the landing platform requires an active system that can detect its condition after touchdown and respond to local terrain variations. The system must not depend only on passive shock absorption or pre-landing hazard avoidance, because these methods cannot fully compensate for small differences in the final contact heights of the landing legs. Instead, the platform must combine sensing, computation, mechanical adjustment, and feedback control in one integrated process.
+
+The principal engineering needs of the project are:
+
+\begin{itemize}
+    \item \textbf{Terrain and attitude sensing methods to detect uneven ground contact, local height differences, and residual platform inclination after touchdown.}
+
+    \item \textbf{Four independently adjustable landing legs capable of extending or retracting to compensate for different ground-contact heights.}
+
+    \item \textbf{A closed-loop control method that repeatedly measures the platform attitude, calculates the required leg-length changes, and commands the actuators until the tilt is reduced below the specified limit.}
+
+    \item \textbf{A sufficiently strong and stable supporting structure that can carry a payload of at least \(15~\mathrm{kg}\) while maintaining reliable actuator motion and sensor alignment.}
+
+    \item \textbf{System integration and experimental validation methods that evaluate tilt reduction, descent speed, payload capacity, and leveling success rate under different uneven-terrain conditions.}
+\end{itemize}
+
+To satisfy the sensing requirement, the platform needs both environmental and internal measurements. Terrain imaging is required to observe the landing surface, while an inertial measurement unit is needed to determine the orientation of the main platform. Additional distance sensors are required to monitor the extension of each adjustable leg. In the proposed system, these functions are provided by an OV5647 camera, a BNO085 inertial measurement unit, and four VL53L0X time-of-flight sensors.
+
+The mechanical system requires four miniature linear actuators so that each landing point can be adjusted independently. Independent control is necessary because the height error at one leg may differ from that at the other three legs. The actuators must also provide sufficient force to support the platform and its payload without uncontrolled retraction or excessive structural deformation.
+
+A processing and control system is required to convert sensor measurements into physical corrections. The ESP32-P4 and ESP-C6 processing unit must analyze the sensing information and calculate the required change in each leg length. The Arduino Mega 2560 must then control the actuators through the motor-driving system. After each movement, the platform attitude must be measured again so that the remaining error can be corrected.
+
+Finally, the completed system must be tested against measurable performance requirements. The final tilt angle should be below \(5.0^\circ\), the payload capacity should be at least \(15~\mathrm{kg}\), the descent speed should be approximately \(5~\mathrm{cm/s}\), and the landing and leveling process should achieve a success rate of at least \(90\%\). Meeting these needs would provide a stable post-touchdown platform for communication equipment, solar panels, scientific instruments, and rover-deployment systems.
+
+\newpage
+
+
+\section{Solution}
+
+
+\begin{enumerate}
+    \item \textbf{A four-corner adaptive landing platform} with one independently controlled linear actuator at each landing corner, allowing the support plane to be adjusted after touchdown on uneven terrain.
+    \item \textbf{A distributed sensing and control architecture} combining four VL53L1X position sensors, a TCA9548A multiplexer, an Arduino Mega 2560 real-time actuator controller, an ESP32-P4 communication gateway, a BNO085 IMU, an OV5647 camera, and an HC-SR04 range sensor.
+    \item \textbf{A completed Stage-1 terrain-elevation control mode} that converts a calibrated elevation map of the four landing-foot regions into coordinated differential leg-length targets.
+    \item \textbf{A mutually exclusive IMU attitude-control mode} that uses measured platform roll and pitch to generate coordinated differential leg corrections.
+    \item \textbf{A layered safety architecture} incorporating explicit arming, command ownership, local position feedback, sensor freshness checks, heartbeat supervision, STOP, ESTOP, travel limits, and all-output-low fault behavior.
+\end{enumerate}
+
+The proposed solution is a terrain-adaptive Mars landing platform intended to reduce post-touchdown tilt when the four landing feet contact terrain of unequal elevation. The platform is approximately $200\,\mathrm{mm}\times200\,\mathrm{mm}$, with one independently driven linear actuator at each corner. A rigid landing configuration transfers local terrain height differences directly into platform roll and pitch; consequently, it can degrade payload stability, camera pointing, and the available actuator travel margin. The proposed system instead treats the four leg positions as independently regulated variables and uses their coordinated motion to alter the support plane formed by the landing feet.
+
+The physical actuators are designated FL, FR, RL, and RR. Their mapping to the Mega controller is fixed as
+\[
+\mathrm{FL}\rightarrow A4,\qquad
+\mathrm{FR}\rightarrow A3,\qquad
+\mathrm{RL}\rightarrow A1,\qquad
+\mathrm{RR}\rightarrow A2.
+\]
+This mapping is essential because the geometric solver uses the order FL--FR--RL--RR whereas the electrical controller uses A1--A4. Each actuator has a dedicated VL53L1X time-of-flight sensor. The four equal-address sensors are isolated through a TCA9548A I$^2$C multiplexer, enabling the Mega to acquire independent position feedback for every leg. The verified direction convention is
+\[
+\text{EXTEND}\Rightarrow d_i\ \text{increases},
+\qquad
+\text{RETRACT}\Rightarrow d_i\ \text{decreases},
+\]
+where $d_i$ is the local VL53 coordinate of actuator $i$.
+
+For every requested target $d_{i,\mathrm{target}}$, the Mega calculates the local position error
+\[
+e_i=d_{i,\mathrm{target}}-d_{i,\mathrm{measured}}.
+\]
+A positive error commands extension and a negative error commands retraction. The actuator output is disabled after the target is reached within the specified tolerance. This local feedback loop is executed on the Mega rather than on the PC, so a delayed Wi-Fi packet, a frozen camera frame, or a Windows application failure cannot remove the fundamental position-feedback and stop functions. Direction reversal includes a $120\,\mathrm{ms}$ break-before-make interval, preventing opposing motor-drive states from being applied simultaneously.
+
+\subsection*{Stage-1 Elevation-Map Landing-Leg Control}
+
+Stage~1 implements the completed terrain-adaptive landing controller. The OV5647 fisheye camera provides an elevation map of the landing area, while the calibrated camera geometry projects the four predicted foot-contact regions into that map. The controller samples a robust local elevation $h_i$ for each foot region $i\in\{\mathrm{FL},\mathrm{FR},\mathrm{RL},\mathrm{RR}\}$. Invalid pixels, regions outside the valid depth field, and inconsistent local estimates are rejected before target generation. The HC-SR04 provides the global millimetre scale anchor for the reconstructed elevation field; it is not used as an independent per-leg height sensor.
+
+The controller removes the common elevation component so that it commands only support-plane compensation rather than an arbitrary collective translation. With
+\[
+\bar h=\frac{1}{4}\sum_{j=1}^{4}h_j,
+\qquad
+\Delta h_i=h_i-\bar h,
+\qquad
+\sum_{i=1}^{4}\Delta h_i=0,
+\]
+the required leg-length correction is generated as
+\[
+L_{i,\mathrm{target}}=L_{i,0}+k_h\Delta h_i,
+\]
+where $L_{i,0}$ is the established landing reference length and $k_h$ is the calibrated sign and scale factor relating terrain elevation to actuator length. Thus, a relative terrain-height change modifies the landing-leg configuration while preserving the mean commanded length. The Console and P4 remap the geometric order FL--FR--RL--RR to the fixed Mega order A4--A3--A1--A2 before sending the four targets to the common Mega position-control routine.
+
+Each candidate correction is constrained to the approved differential travel envelope $|\Delta L_i|\leq100\,\mathrm{mm}$. If a candidate would cross a leg travel boundary, all four differential corrections are reduced by one common scale factor rather than clipping individual legs. This preserves the intended support-plane orientation and the zero-sum condition. The Mega then closes the four local VL53L1X feedback loops independently; it stops each output on target, stale feedback, invalid feedback, timeout, STOP, or ESTOP. Consequently, the elevation map selects the coordinated target geometry, while the hardware-proven Mega loop remains responsible for final actuator positioning and non-motion safety.
+
+The Stage-1 result is a complete path from camera-derived terrain elevations to bounded four-leg target lengths. It compensates the relative elevation differences across the four foot regions and therefore reduces predicted post-touchdown roll and pitch without treating the absolute terrain range as an individual leg command.
+
+\subsection*{Stage-2 IMU Attitude-Control Solution}
+
+The second control owner is the IMU mode. It is mutually exclusive with Stage-1 elevation-map control: switching modes first issues STOP to the active owner, clears pending targets, and requires a new explicit ARM action. The BNO085 provides platform attitude. Its installation-frame transformation converts the sensor reading into platform roll and pitch, which are then used to generate coordinated differential leg corrections. The target condition is approximately
+\[
+|\phi_{\mathrm{platform}}|\leq1^\circ,
+\qquad
+|\theta_{\mathrm{platform}}|\leq1^\circ.
+\]
+
+IMU control changes opposing corners in opposite directions where appropriate, producing a change in support-plane orientation rather than an arbitrary common vertical displacement. The existing IMU pathway retains its validated outer attitude correction, inner position regulation, bounded target update rate, and Mega-side local safety checks. It is therefore an automatic leveling mode based on measured inertial state, complementary to the completed Stage-1 terrain-elevation controller.
+
+\subsection*{Safety and Communication Solution}
+
+The lander uses a layered authority model. The PC Console provides user interaction, status visualization, and high-level mode requests. The ESP32-P4 handles Wi-Fi, the camera and IMU interfaces, USB Host communication, and a single serialized command path to the Mega CH340 interface. The Mega remains the actuator safety authority. It implements the states \texttt{LOCKED}, \texttt{STAGE1\_ELEVATION}, \texttt{IMU\_ACTIVE}, \texttt{FAULT}, and \texttt{ESTOP}.
+
+In \texttt{LOCKED}, \texttt{FAULT}, and \texttt{ESTOP}, all motor enable and direction outputs are low. Host-owned sessions require a heartbeat; if no valid heartbeat arrives within two seconds, the Mega stops the outputs. Each VL53 reading must be valid and newer than the sensor freshness threshold. The controller also rejects targets above the $400\,\mathrm{mm}$ upper limit. STOP and ESTOP bypass normal motion authorization. Consequently, the proposed lander does not rely on correct PC software, continuous Wi-Fi, or valid computer vision to preserve a safe non-motion state.
+
+\newpage
+
+\section{Objectives}
+
+The seven objectives below correspond one-to-one with Tasks~1--7 in Section~\ref{sec:tasks}. Each objective defines the intended deliverable and the verification focus of its corresponding task.
+
+\textbf{Objective 1 (Task 1): Design and fabricate the aluminum frame.}
+
+Develop a rigid 2020L aluminum-extrusion support frame that provides the required height, stiffness, and attachment points for the four-point suspension and landing-platform test system. Verify that the frame can safely support the platform, payload, winch assemblies, and associated wiring without unacceptable deformation or loss of alignment.
+
+\textbf{Objective 2 (Task 2): Design and control the four-winch descent system.}
+
+Design the four-motor winch mechanism and its L298N-based control system so that the suspended platform can descend and be retrieved with coordinated cable motion. Establish start/stop, direction-reversal, braking, and individual PWM compensation behavior, then verify a controlled descent speed of approximately $5~\mathrm{cm/s}$.
+
+\textbf{Objective 3 (Task 3): Design and fabricate the adjustable landing platform.}
+
+Build the $300~\mathrm{mm}\times300~\mathrm{mm}$ acrylic landing platform, four angled linear-actuator legs, reinforced brackets, articulated feet, and leg-displacement sensing mounts. The completed structure must provide independent FL, FR, RL, and RR adjustment, preserve the geometric-to-electrical leg mapping, and support at least $15~\mathrm{kg}$ while maintaining mechanical stability and sensor alignment.
+
+\textbf{Objective 4 (Task 4): Implement computer-vision-based terrain detection.}
+
+Use the calibrated OV5647 fisheye camera to construct an elevation map of the landing area and estimate robust relative elevations in the four projected foot-contact regions. Use the HC-SR04 only as a global millimetre scale anchor, reject invalid terrain regions, and transform valid relative elevations into a zero-sum, travel-bounded four-leg compensation vector rather than four independent absolute-height commands.
+
+\textbf{Objective 5 (Task 5): Implement IMU-based automatic leveling.}
+
+Use the BNO085 to measure platform roll and pitch after touchdown and implement a mutually exclusive automatic leveling mode that commands coordinated differential leg corrections. Verify that the controller uses bounded updates, the Mega local position-feedback loop, and STOP/ESTOP protection to reduce residual platform tilt toward the $5.0^\circ$ design limit without arbitrary collective leg motion.
+
+\textbf{Objective 6 (Task 6): Design and fabricate repeatable simulated terrain.}
+
+Create laboratory terrain fixtures with known slopes, steps, and unequal landing-foot elevations that reproduce the local-height disturbances expected during touchdown. The terrain must be stable, repeatable, compatible with the articulated feet, and sufficiently varied to evaluate both elevation-map compensation and IMU-based leveling.
+
+\textbf{Objective 7 (Task 7): Integrate and validate the complete landing system.}
+
+Integrate the aluminum frame, winch system, landing platform, terrain sensing, IMU, controllers, communication path, and simulated terrain into one testable prototype. Validate system-level performance through repeated landing trials, including final tilt, descent speed, payload capacity, sensor and actuator safety behavior, and a leveling success rate of at least $90\%$.
+
+
+
+\newpage
+
+\section{Tasks}
+\label{sec:tasks}
+
+\subsection{Overview of Project Tasks and Workflow}
+
+
+
+\newpage
+
+\subsection{Task 1: Aluminum Frame Design and Fabrication}
+
+\subsubsection{Structural Requirement Analysis}
+
+\subsubsection{Aluminum Frame Design and Fabrication}
+
+
+
+\newpage
+
+\subsection{Task 2: Winch Motor System Design and Control}
+
+\subsubsection{Winch Mechanism Design}
+
+\subsubsection{Winch Motor Control}
+
+
+\newpage
+
+\subsection{Task 3: Landing Platform Design and Fabrication}
+
+\subsubsection{Platform Structural Design and Assembly}
+
+The landing platform was designed as a lightweight and modular mechanical structure that integrates four independently adjustable landing legs, the electronic control hardware, and the interfaces required for the external descent system. The main platform was fabricated from a \(5~\mathrm{mm}\)-thick acrylic plate with an overall envelope of \(300~\mathrm{mm}\times300~\mathrm{mm}\). Rather than using the complete square plate, the four corner regions were removed, leaving a \(200~\mathrm{mm}\times200~\mathrm{mm}\) central area with four \(100~\mathrm{mm}\)-wide extensions centered on its sides. These extensions provided dedicated locations for the suspension eye nuts and allowed the four suspension points to be aligned with the winch system mounted on the external aluminum frame.
+
+The acrylic plate also served as a modular mounting board for the electronic components. A regular array of \(4~\mathrm{mm}\)-diameter mounting holes was fabricated at \(20~\mathrm{mm}\) intervals across the usable platform area. The resulting perforated-board structure allowed the Arduino, sensor interfaces, motor-control electronics, wiring, and other modules to be secured using cable ties without requiring a dedicated mounting hole pattern for every component. This arrangement simplified assembly and allowed the positions of individual modules to be adjusted during system integration. It also made components easier to remove or replace when modifications were required.
+
+Four linear actuators formed the adjustable landing legs. Each actuator was mounted at one corner of the acrylic platform using a customized 3D-printed PLA bracket. The mounting geometry was modeled in SolidWorks so that each actuator was installed at an angle of \(30^\circ\) from the vertical direction. Integrating this angle directly into the bracket geometry ensured that the four legs could be assembled with a consistent orientation without manually setting the angle during installation. The outward inclination also increased the spacing between the four ground-contact points relative to the size of the central platform while providing sufficient clearance for actuator extension.
+
+Additional customized PLA components were designed for the displacement-measurement system installed on each landing leg. A VL53L0X Time-of-Flight sensor and a matte target plate were mounted on the two relatively moving sections of each actuator using separate 3D-printed holders. As the actuator extended or retracted, the relative distance between the sensor and the target changed accordingly. The target plate provided a defined measurement surface, allowing the measured distance to represent the change in actuator extension. This mechanical arrangement therefore integrated the leg-length measurement hardware directly into the actuator structure without modifying the actuator itself.
+
+Each actuator was also equipped with a 3D-printed articulated foot at its lower end. The foot was connected through a single-axis rotating joint rather than being rigidly fixed to the actuator rod. This allowed the contact surface to rotate relative to the leg and accommodate different local surface angles when the platform landed on uneven terrain. The articulated connection reduced the requirement for the actuator axis to remain perpendicular to the terrain at every landing point and provided a larger and more adaptable contact surface than the actuator rod alone.
+
+The structural design of the actuator brackets was revised during fabrication after an initial load-bearing failure. The first version of the PLA actuator mounting bracket was printed with a \(15\%\) infill ratio. Because this bracket transferred the landing-leg load directly to the acrylic platform, the relatively low-density printed structure was insufficient for the required load and fractured during testing. The bracket was subsequently thickened and reprinted with \(100\%\) infill. The reinforced version was then used for the final assembly. This modification demonstrated that the actuator mounting brackets were load-bearing structural components and therefore required substantially greater strength than non-load-bearing sensor holders.
+
+The complete structure was assembled in stages. First, the external 2020L aluminum extrusion frame was constructed and the four-motor winch system was installed at the top of the frame. In parallel, the four linear actuators and their reinforced 3D-printed mounting brackets were attached to the corners of the acrylic platform. The sensor holders, matte target plates, and articulated feet were then installed on the corresponding sections of each landing leg. The electronic modules were positioned on the perforated acrylic plate and secured through the mounting holes using cable ties. Finally, the suspension eye nuts on the four side extensions of the platform were connected to the fishing-line suspension system and aligned with the four winches above. This modular assembly procedure allowed the landing platform and the external descent frame to be constructed and tested separately before being integrated into the complete landing system.
+
+
+
+\newpage
+
+\subsection{Task 4: Computer Vision Based Terrain Detection}
+\label{task:cv-terrain}
+
+\subsubsection{Fisheye Calibration and Platform Coordinate System}
+
+Task~4 developed the terrain-observation path used to estimate the relative elevation at the four expected landing-foot regions. The downward-looking OV5647 camera operated at $800\times800$ pixels. Because its fisheye lens introduces substantial distortion away from the image center, the camera was calibrated with an $11\times8$ square checkerboard containing $10\times7$ inner corners and $15~\mathrm{mm}$ squares. Thirty-six valid calibration views were retained. The OpenCV fisheye solution achieved a mean reprojection error of $0.562$ pixels and an RMS error of $0.717$ pixels, providing the intrinsic matrix and distortion coefficients used in terrain projection.
+
+A camera-to-platform transformation was then measured with the checkerboard fixed in the platform coordinate frame. Twenty pose samples established the rigid transformation. The camera center was approximately $354.7~\mathrm{mm}$ above the board reference plane, and the optical-axis tilt relative to the board normal was $3.66^\circ$. An asymmetric front marker verified the axis convention: platform $+x$ points right, platform $+y$ points forward, and platform $+z$ points upward. This verification is essential because a geometrically valid image measurement must still be associated with the correct physical landing leg.
+
+\subsubsection{Depth-Map Construction and Scale Anchoring}
+
+The PC receives the downward camera stream, rejects frames with insufficient scene structure, and estimates dense depth maps from accepted images. A metric-depth estimate and a relative-depth estimate are fused. To reduce sensitivity to JPEG artifacts, motion blur, and isolated inference errors, the software captures thirty valid depth maps, ranks them by consistency, and aggregates the best ten into a stable point cloud. The accepted fisheye intrinsics and camera-to-platform transformation then map valid samples into the platform coordinate system.
+
+The HC-SR04 sensor is mounted beside the camera and is used only as a global millimetre-scale anchor. Its reading is accepted only when it is valid, fresh, within $20$--$4000~\mathrm{mm}$, and consistent with the depth values near the optical center. One accepted range measurement scales the complete depth map; it is not used as an individual-leg height sensor. This preserves the required distinction between a global distance reference and the four spatial terrain observations needed to determine support-plane shape.
+
+\subsubsection{Four-Foot Terrain Sampling and Differential Command}
+
+For each projected foot-contact region $i\in\{\mathrm{FL},\mathrm{FR},\mathrm{RL},\mathrm{RR}\}$, the transformed point cloud is sampled to obtain a robust local terrain elevation $h_i$. A candidate is rejected if a foot region is not visible, contains invalid depth, or gives no mechanically safe contact solution. Partially visible terrain is retained only as a diagnostic preview and is never allowed to produce a motion command.
+
+The controller removes the common elevation component before target generation:
+\[
+\bar h=\frac{1}{4}\sum_{j=1}^{4}h_j,
+\qquad
+\Delta h_i=h_i-\bar h,
+\qquad
+\sum_{i=1}^{4}\Delta h_i=0.
+\]
+This zero-sum condition ensures that a uniform shift in terrain range does not command an arbitrary collective extension or retraction. The resulting vector is generated in geometric order FL--FR--RL--RR and mapped to Mega channels A4--A3--A1--A2. Each relative correction is limited to $\pm100~\mathrm{mm}$. If a proposed value would exceed the available $50$--$400~\mathrm{mm}$ VL53 range, all four entries are reduced by one common scale factor; independent clipping is not used because it would distort the compensated support-plane shape. Integer rounding is balanced again so the final four-leg command remains exactly zero-sum.
+
+\subsubsection{Task Outcome}
+
+Task~4 produced a safety-gated pipeline from OV5647 imagery to a bounded four-leg terrain-compensation vector: calibrated image $\rightarrow$ fused depth map $\rightarrow$ platform-coordinate elevation field $\rightarrow$ four foot-region elevations $\rightarrow$ common-mode removal and travel scaling. A source-derived pipeline diagram should be inserted after this paragraph, showing these six stages and the four-leg output vector. A generative image is not suitable as evidence for this calibrated geometric process.
+
+\newpage
+
+\subsection{Task 5: IMU-Based Automatic Leveling}
+\label{task:imu-leveling}
+
+\subsubsection{Attitude Measurement and Arming}
+
+Task~5 implemented the inertial feedback path used after touchdown to reduce residual platform roll and pitch. The BNO085 operates in UART-RVC mode and reports attitude data to the ESP32-P4. Before control, the software removes the installation zero and applies the validated orthogonal transformation from the IMU frame to the platform frame. This ensures that the controller responds to physical platform roll and pitch rather than to an arbitrary sensor-frame rotation.
+
+IMU leveling is mutually exclusive with the terrain-elevation mode. Selecting a mode first sends STOP, clears any previous target vector, and requires a new explicit ARM operation. At ARM, the Mega verifies that all four VL53 sensors are fresh and within the $50$--$400~\mathrm{mm}$ valid range, captures the current readings as a four-leg baseline, and initializes all relative targets to zero. Thus every IMU correction is referenced to a known, measured landing posture.
+
+\subsubsection{Differential PID Controller}
+
+The controller aims to achieve
+\[
+|\phi|<1.0^\circ,
+\qquad
+|\theta|<1.0^\circ,
+\]
+where $\phi$ and $\theta$ are platform roll and pitch. Outside $5^\circ$ from level, proportional control provides rapid approach. Inside this region, reduced-gain PID control improves convergence while limiting oscillation. The implemented inner-loop gains are $K_P=1.0$, $K_I=0.5$, and $K_D=1.0$, with integral limiting and derivative filtering. The roll and pitch corrections are each bounded to $\pm50~\mathrm{mm}$ before conversion to actuator commands.
+
+For the $200~\mathrm{mm}\times200~\mathrm{mm}$ four-corner platform, the differential mixer is
+\[
+\begin{aligned}
+\Delta L_{\mathrm{FL}}&=\frac{-\Delta_R+\Delta_P}{\cos30^\circ}, &
+\Delta L_{\mathrm{FR}}&=\frac{+\Delta_R+\Delta_P}{\cos30^\circ},\\
+\Delta L_{\mathrm{RL}}&=\frac{-\Delta_R-\Delta_P}{\cos30^\circ}, &
+\Delta L_{\mathrm{RR}}&=\frac{+\Delta_R-\Delta_P}{\cos30^\circ}.
+\end{aligned}
+\]
+A roll error therefore produces opposite corrections on the left and right sides, while a pitch error produces opposite corrections on the front and rear sides. The four terms sum to zero, changing support-plane orientation without arbitrary collective heave. The command generator rate-limits the target change to $5~\mathrm{mm/s}$ and limits transmission to $10~\mathrm{Hz}$.
+
+\subsubsection{Mega Feedback Loop and Safety}
+
+The ESP32-P4 forwards FL--FR--RL--RR relative targets over USB Host--CH340 to the Arduino Mega, which maps them to its verified physical order A4--A3--A1--A2. The Mega closes the final actuator loop with the four VL53 sensors and stops a leg when its relative position error is within $1~\mathrm{mm}$. A $120~\mathrm{ms}$ break-before-make interval is enforced before direction reversal.
+
+Safety remains local to the Mega. A heartbeat is required at least every $2~\mathrm{s}$; stale feedback, invalid or out-of-range VL53 readings, malformed commands, or heartbeat loss immediately disable all motor outputs and latch a fault. STOP returns the system to the disarmed all-output-low state, while ESTOP remains latched until reset. Therefore, an interrupted Wi-Fi link, frozen PC interface, or stale IMU stream cannot leave a landing leg energized without local position feedback.
+
+\subsubsection{Task Outcome}
+
+Task~5 produced the closed-loop chain BNO085 attitude $\rightarrow$ installation-frame transformation $\rightarrow$ bounded PID controller $\rightarrow$ zero-sum four-leg delta vector $\rightarrow$ Mega VL53 feedback. It complements Task~4: vision predicts a terrain-compensating landing configuration, while the IMU loop removes remaining measured roll and pitch after touchdown. A source-derived control-block diagram should be inserted after this paragraph, showing the BNO085, coordinate transformation, PID controller, differential mixer, P4--Mega link, VL53 feedback, and STOP/ESTOP safety loop.
+
+\newpage
+
+\subsection{Task 6: Simulated Terrain Design and Fabrication}
+
+
+
+\newpage
+
+\subsection{Task 7: System Integration and Validation}
+
+\newpage
+
+\section{Discussion}
+
+
+
+
+
+
+\newpage
+
+\section{Conclusions}
+\label{sec:conclusions}
+
+The objective of this project was to develop a self-stabilizing landing platform capable of reducing the tilt caused by uneven Martian terrain. To achieve this objective, the group designed and manufactured a four-leg aluminum-frame platform with independently adjustable linear actuators. The system combined terrain imaging, attitude sensing, actuator-position measurement, data processing, motor control, and closed-loop correction. After touchdown, the platform measured its inclination, calculated the required adjustment of each leg, and repeatedly corrected its attitude until the remaining tilt was reduced.
+
+The completed prototype successfully met all four quantitative design objectives. Physical testing produced an average final tilt angle of \(2.61^\circ\), below the required limit of \(5.0^\circ\). The measured descent speed was \(5.2~\mathrm{cm/s}\), which was close to the target of approximately \(5~\mathrm{cm/s}\). The platform supported a payload of at least \(16~\mathrm{kg}\), exceeding the required \(15~\mathrm{kg}\), and completed 19 of 20 trials successfully, corresponding to a \(95\%\) success rate. The prototype was also completed at a total cost of \(958.1~\mathrm{RMB}\), which remained within the planned \(1000~\mathrm{RMB}\) budget.
+
+The main contribution of the design is the integration of active post-touchdown leveling with independent leg control. Existing passive landing structures can absorb impact, while hazard-detection systems can help avoid dangerous regions before landing. In contrast, the proposed platform continues to respond after ground contact by measuring its actual attitude and correcting unequal landing-leg heights through feedback control. The project demonstrated that commercially available sensors, controllers, and actuators can be integrated into a relatively low-cost system capable of adapting to different uneven surfaces.
+
+Several important lessons were learned during the project. Mechanical construction, sensor calibration, circuit connection, programming, and control testing must be treated as parts of one complete system rather than as separate tasks. Full-system integration should begin early because actuator inconsistency, sensor errors, structural misalignment, and communication problems may only appear when all components operate together. Although the prototype verified the feasibility of the design, future work should include Mars-like terrain testing, improved fault tolerance, greater payload capacity, and faster control convergence.
+
+The broader significance of this project is its potential to improve the reliability of planetary exploration missions. A more level landing platform can provide better operating conditions for communication systems, solar panels, scientific instruments, and rover deployment. By reducing the risk of mission failure and protecting expensive onboard equipment, active self-leveling technology may improve scientific return while reducing the financial and resource losses associated with unsuccessful landings.
+
+
+
+
+\newpage
+
+\section{Schedule}
+
+
+
+
+
+
+\newpage
+
+\section{Bill of materials}
+
+%==============================
+% Bill of Materials
+%==============================
+
+\begin{center}
+\renewcommand{\arraystretch}{1.18}
+
+\begin{longtable}{
+@{}
+p{0.08\textwidth}
+>{\centering\arraybackslash}p{0.34\textwidth}
+>{\centering\arraybackslash}p{0.16\textwidth}
+>{\centering\arraybackslash}p{0.16\textwidth}
+>{\centering\arraybackslash}p{0.12\textwidth}
+@{}
+}
+
+\caption{\quad \textbf{Bill of materials (BOM)}}
+\label{tab:bill_of_materials}\\
+
+\hline
+\hline
+
+Quantity & Part Description & Purchased From* & Part Number & Cost (RMB)\\
+
+\midrule
+\endfirsthead
+
+\hline
+\hline
+
+Quantity & Part Description & Purchased From* & Part Number & Cost (RMB)\\
+
+\midrule
+\endhead
+
+1 & ESP32-P4-NANO development board with WiFi 6 Kit A & Taobao [1] & ESP32-P4-NANO & 165.00 \\
+
+1 & Four-channel motor driver module & Taobao [2] & L298N & 35.62 \\
+
+4 & Mini linear actuator, 12 V, 200 mm stroke, 20 mm/s & Taobao [3] & 12V-200mm & 400.00 \\
+
+1 & European standard 2020L aluminum extrusion frame & Taobao [4] & 2020L & 216.54 \\
+
+1 & I2C multiplexer module & Taobao [5] & TCA9548A & 20.00 \\
+
+4 & Laser distance measurement module & Taobao [6] & VL53L0X & 100.00 \\
+
+1 & 9-axis IMU sensor & Taobao & BNO085 & 84.00 \\
+
+1 & Camera module & Taobao & OV5647 & 114.60 \\
+
+\hline
+\hline
+
+&
+&
+&
+\textbf{Total =}
+&
+\textbf{1170.96}
+
+\end{longtable}
+
+\vspace{0.15cm}
+
+\noindent
+\textbf{*Purchase links:}
+
+\begin{enumerate}
+
+\item
+\url{https://e.tb.cn/h.RvltKvSMPLN7kzW?tk=O5Ybg97dI3w}
+
+\item
+\url{https://e.tb.cn/h.RueoXSIDdBIatIH?tk=5xNbg97X4Lz}
+
+\item
+\url{https://e.tb.cn/h.RFdis51r2zfegjp?tk=YKlhg97cRSt}
+
+\item
+\url{https://e.tb.cn/h.RuGLJzAbn9LrmKU?tk=LAn9gkFmqG3}
+
+\item
+\url{https://e.tb.cn/h.8WyMNK8ZtYsXuU9?tk=EksMgE9D4Nv}
+
+\item
+\url{https://e.tb.cn/h.83wSaOYP19eBEZn?tk=BfL8gE9x70m}
+
+\end{enumerate}
+
+
+\renewcommand{\arraystretch}{1.2}
+
+\end{center}
+
+\newpage
+
+\section{Key Personnel}
+
+
+
+
+
+
+\newpage
+
+\bibliography{reference}
+
+
+
+
+
+
+\newpage
+
+\section{Appendix}
+
+\subsection{Winch Motor Control Code}
+
+The following Arduino program was developed to control the four winch motors used in the descent mechanism of the landing platform. The program controls four DC motors through L298N motor drivers and provides bidirectional rotation, start/stop control, and direction switching through user input buttons. Individual PWM values are assigned to each motor to compensate for speed variations and achieve synchronized cable deployment and retrieval during the descent process.
+
+\begin{lstlisting}[style=appendixcode,language=C++]
+// ==================== Motor Pins ====================
+// Avoid using UNO D0/D1 because they are reserved for Serial RX/TX.
+// Original M1_IN1=0 and M1_IN2=1. Changed to A2 and A3.
+
+const int M1_IN1=A2,M1_IN2=A3,M2_IN1=2,M2_IN2=8; // First L298N
+
+const int M3_IN1=4,M3_IN2=5,M4_IN1=6,M4_IN2=7; // Second L298N
+
+const int M1_EN=9,M2_EN=10,M3_EN=11,M4_EN=3; // ENA / ENB pins must be connected to PWM pins
+
+
+// ==================== Button Pins ====================
+
+// Yellow button: Start / Stop Blue button: Forward / Reverse
+
+const int YELLOW_BUTTON=A0,BLUE_BUTTON=A1;
+
+// Button module outputs HIGH when pressed const int PRESSED_LEVEL=HIGH;
+
+
+// ==================== Speed Settings ====================
+
+// Motor mapping:
+// M1 = First L298N OUT1/OUT2 M2 = First L298N OUT3/OUT4 M3 = Second L298N OUT1/OUT2 M4 = Second L298N OUT3/OUT4
+
+// Forward startup PWM
+const int FORWARD_START_PWM[4]={180,180,180,180};
+
+// Forward running PWM
+// Adjusted individually to compensate for motor speed differences.
+int FORWARD_RUN_PWM[4]={33,33,36,41};
+
+// Reverse startup PWM
+const int REVERSE_START_PWM[4]={220,220,220,220};
+
+// Reverse running PWM
+// Higher values are required to overcome gravity during cable retrieval.
+int REVERSE_RUN_PWM[4]={120,120,100,120};
+
+// Startup high PWM duration
+const unsigned long START_TIME=300;
+
+// Delay before changing motor direction
+const unsigned long DIRECTION_CHANGE_DELAY=500;
+
+
+// ==================== Current State ====================
+
+bool isRunning=false;
+bool isForward=true;
+
+int lastYellowState=LOW,lastBlueState=LOW;
+
+unsigned long lastYellowTime=0,lastBlueTime=0;
+
+const unsigned long debounceDelay=50;
+
+
+// ==================== Initialization ====================
+
+void setup(){
+  pinMode(M1_IN1,OUTPUT); pinMode(M1_IN2,OUTPUT);
+  pinMode(M2_IN1,OUTPUT); pinMode(M2_IN2,OUTPUT);
+  pinMode(M3_IN1,OUTPUT); pinMode(M3_IN2,OUTPUT);
+  pinMode(M4_IN1,OUTPUT); pinMode(M4_IN2,OUTPUT);
+
+  pinMode(M1_EN,OUTPUT); pinMode(M2_EN,OUTPUT);
+  pinMode(M3_EN,OUTPUT); pinMode(M4_EN,OUTPUT);
+
+  pinMode(YELLOW_BUTTON,INPUT); pinMode(BLUE_BUTTON,INPUT);
+
+  brakeMotors();
+}
+
+
+// ==================== Main Loop ====================
+
+void loop(){
+  handleYellowButton();
+  handleBlueButton();
+}
+
+// ==================== Yellow Button ====================// Controls start / stop.
+
+void handleYellowButton(){
+  int currentState=digitalRead(YELLOW_BUTTON);
+
+  if(currentState==PRESSED_LEVEL &&
+     lastYellowState!=PRESSED_LEVEL &&
+     millis()-lastYellowTime>debounceDelay){
+
+    isRunning=!isRunning;
+
+    if(isRunning){
+      startMotors();
+    }
+    else{
+      brakeMotors();
+    }
+
+    lastYellowTime=millis();
+  }
+  lastYellowState=currentState;
+}
+
+// ==================== Blue Button ==================== // Controls forward / reverse direction.
+
+void handleBlueButton(){
+  int currentState=digitalRead(BLUE_BUTTON);
+
+  if(currentState==PRESSED_LEVEL &&
+     lastBlueState!=PRESSED_LEVEL &&
+     millis()-lastBlueTime>debounceDelay){
+
+    if(isRunning){ // Brake before changing direction.
+      brakeMotors();
+      delay(DIRECTION_CHANGE_DELAY);
+    }
+    isForward=!isForward;
+
+    if(isRunning){
+      startMotors();
+    }
+
+    lastBlueTime=millis();
+  }
+
+  lastBlueState=currentState;
+}
+
+// ==================== Direction Control ====================
+
+void applyDirection(){
+  if(isForward){
+    setDirectionForward();
+  }
+  else{
+    setDirectionReverse();
+  }
+}
+
+// ==================== Forward Direction ====================
+
+void setDirectionForward(){
+
+  digitalWrite(M1_IN1,HIGH); digitalWrite(M1_IN2,LOW);
+  digitalWrite(M2_IN1,HIGH); digitalWrite(M2_IN2,LOW);
+  digitalWrite(M3_IN1,HIGH); digitalWrite(M3_IN2,LOW);
+  digitalWrite(M4_IN1,HIGH); digitalWrite(M4_IN2,LOW);
+}
+
+// ==================== Reverse Direction ====================
+
+void setDirectionReverse(){
+
+  digitalWrite(M1_IN1,LOW); digitalWrite(M1_IN2,HIGH);
+  digitalWrite(M2_IN1,LOW); digitalWrite(M2_IN2,HIGH);
+  digitalWrite(M3_IN1,LOW); digitalWrite(M3_IN2,HIGH);
+  digitalWrite(M4_IN1,LOW); digitalWrite(M4_IN2,HIGH);
+}
+
+
+// ==================== Motor Start ====================
+
+void startMotors(){
+
+  applyDirection();
+
+  if(isForward){
+
+    setAllMotorPWM(FORWARD_START_PWM);
+    delay(START_TIME);
+    setAllMotorPWM(FORWARD_RUN_PWM);
+
+  }
+  else{
+
+    setAllMotorPWM(REVERSE_START_PWM);
+    delay(START_TIME);
+    setAllMotorPWM(REVERSE_RUN_PWM);
+
+  }
+}
+
+
+// ==================== Brake Stop ==================== // Keeps EN pins HIGH and sets IN1/IN2 to the same level.
+// L298N enters short brake mode.
+
+void brakeMotors(){
+
+  digitalWrite(M1_IN1,LOW); digitalWrite(M1_IN2,LOW);
+  digitalWrite(M2_IN1,LOW); digitalWrite(M2_IN2,LOW);
+  digitalWrite(M3_IN1,LOW); digitalWrite(M3_IN2,LOW);
+  digitalWrite(M4_IN1,LOW);digitalWrite(M4_IN2,LOW);
+
+  analogWrite(M1_EN,255); analogWrite(M2_EN,255);
+  analogWrite(M3_EN,255); analogWrite(M4_EN,255);
+}
+
+
+// ==================== Coast Stop ==================== // Not recommended when motors are holding a suspended platform.
+
+void coastMotors(){
+
+  analogWrite(M1_EN,0); analogWrite(M2_EN,0);
+  analogWrite(M3_EN,0); analogWrite(M4_EN,0);
+
+}
+
+
+// ==================== Set Motor PWM ====================
+
+void setAllMotorPWM(const int pwmValues[4]){
+
+  analogWrite(M1_EN,constrain(pwmValues[0],0,255)); analogWrite(M2_EN,constrain(pwmValues[1],0,255));
+  analogWrite(M3_EN,constrain(pwmValues[2],0,255)); analogWrite(M4_EN,constrain(pwmValues[3],0,255));
+
+}
+
+\end{lstlisting}
+
+
+
+\end{document}

@@ -1,0 +1,16 @@
+{
+  "status": "fail",
+  "output_dir": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1",
+  "files": {
+    "parameters": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\design_parameters_and_fit_notes.json",
+      "size_bytes": 2254
+    }
+  },
+  "previews": [],
+  "solidworks_connection": "started_new_instance",
+  "solidworks_revision": "30.5.0",
+  "template": "C:\\ProgramData\\SolidWorks\\SOLIDWORKS 2022\\templates\\gb_part.prtdot",
+  "error": "Failed to save mars_lander_control_box_base_v1.SLDPRT: errors=1, warnings=0",
+  "traceback": "Traceback (most recent call last):\n  File \"E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\create_control_box.py\", line 351, in main\n    report[\"files\"][\"base_sldprt\"] = {\"path\":str(BASE_PATH), **save_part(base, BASE_PATH)}\n                                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\create_control_box.py\", line 149, in save_part\n    raise RuntimeError(f\"Failed to save {path.name}: errors={errors.value}, warnings={warnings.value}\")\nRuntimeError: Failed to save mars_lander_control_box_base_v1.SLDPRT: errors=1, warnings=0\n"
+}

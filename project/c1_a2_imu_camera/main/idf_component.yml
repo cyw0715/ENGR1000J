@@ -1,0 +1,6 @@
+dependencies:
+  idf: ">=5.4"
+  espressif/esp_cam_sensor:
+    path: "../../wifi_test/components/esp_cam_sensor"
+  espressif/esp_sccb_intf:
+    path: "../../wifi_test/managed_components/espressif__esp_sccb_intf"

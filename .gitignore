@@ -1,0 +1,101 @@
+# ---- Build artifacts (ESP-IDF / CMake) ----
+**/build/
+**/managed_components/
+sdkconfig.old
+**/sdkconfig.old
+*.map
+*.elf
+*.o
+*.obj
+*.a
+*.pyc
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Python virtualenvs ----
+**/.venv/
+**/.venv_*/
+**/venv/
+**/env/
+
+# ---- Local large media (kept on disk, not in Git) ----
+media/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.gif
+
+# ---- Flash dumps / binary firmware blobs ----
+*.bin
+!**/partitions.bin
+**/backups/
+**/factory_firmware/
+
+# ---- Experiment logs & frame captures ----
+*.log
+*.jsonl
+**/timestamp_capture*/
+**/frames/
+**/crop_candidates/
+**/left_camera_frames/
+**/raw_console_frames/
+**/depth_saves/
+**/moge_results/
+**/results/
+**/ref_jpeg/
+
+# ---- Model weights & third-party research checkouts ----
+*.pth
+*.pt
+*.onnx
+*.safetensors
+project/pc_viewer/metric_depth_eval/Depth-Anything-V2/
+project/pc_viewer/metric_depth_eval/MoGe/
+project/pc_viewer/metric_depth_eval/moge_deps/
+project/pc_viewer/metric_depth_eval/.venv/
+project/pc_viewer/metric_depth_eval/.venv_moge/
+
+# ---- Vendor bulk demos (Waveshare package, regenerable / downloadable) ----
+project/waveshare_p4/examples/
+project/waveshare_p4/firmware/
+project/waveshare_p4/tools/
+
+# ---- CAD bulk / vendor archives (STEP of custom parts are tracked) ----
+CAD/*.zip
+CAD/*.SLDPRT
+CAD/*.SLDASM
+CAD/ESP32-P4-Nano.stp
+CAD/Arducam*.step
+CAD/MPU*.STEP
+CAD/L298N*
+CAD/Ultrasonic*
+CAD/TCA9548.stp
+CAD/jc35n6*
+project/mechanical/**/*.bmp
+
+# ---- IDE / OS ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Local scratch / editor backups ----
+tmp.*
+*_tmp.*
+_build_*.log
+_build_output.log
+*.bak
+a.out
+CMakeConfigureLog.yaml
+CMakeRCCompiler.cmake
+CMakeSystem.cmake
+cmake.check_cache
+idf_py_*_output_*
+*.map
+**/compile_commands.json

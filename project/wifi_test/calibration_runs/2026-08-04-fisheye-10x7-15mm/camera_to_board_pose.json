@@ -1,0 +1,71 @@
+{
+  "schema": "mars-lander-camera-to-board-v1",
+  "created_utc": "2026-08-04T17:34:35.842484+00:00",
+  "intrinsics_path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\wifi_test\\calibration_runs\\2026-08-04-fisheye-10x7-15mm\\fisheye_calibration.json",
+  "image_size": [
+    800,
+    800
+  ],
+  "samples": 20,
+  "board": {
+    "inner_corners": [
+      10,
+      7
+    ],
+    "square_mm": 15.0,
+    "placement": "flat; long edge platform left-right; PDF text edge points platform front"
+  },
+  "R_board_to_camera": [
+    [
+      0.02836451670498931,
+      -0.9985531136110767,
+      0.045685156120085946
+    ],
+    [
+      0.998542612977318,
+      0.030404252486937167,
+      0.04458958958255577
+    ],
+    [
+      -0.04591409653388133,
+      0.04435381300784432,
+      0.9979602371894096
+    ]
+  ],
+  "t_board_to_camera_mm": [
+    52.954191640573185,
+    -60.591192243653815,
+    355.7394887203586
+  ],
+  "camera_center_board_mm": [
+    75.33432459902097,
+    38.941400086703666,
+    -354.7313486588587
+  ],
+  "camera_height_above_board_mm": 354.7313486588587,
+  "camera_optical_axis_in_board": [
+    -0.04591409653388133,
+    0.04435381300784432,
+    0.9979602371894096
+  ],
+  "optical_axis_tilt_from_board_normal_deg": 3.6601704799647767,
+  "sample_reprojection_mean_px": 0.34492615168281643,
+  "sample_reprojection_max_px": 0.36628622438838637,
+  "axis_mapping_validated": true,
+  "platform_axis_mapping": {
+    "board_x": "platform_x_right",
+    "board_y": "platform_y_front",
+    "board_z": "platform_z_up"
+  },
+  "front_marker_validation": {
+    "marker_description": "white block outside checkerboard left long edge",
+    "front_relation": "marker lies on board +Y side",
+    "frame_path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\wifi_test\\calibration_runs\\2026-08-04-fisheye-10x7-15mm\\front_marker_frame.jpg",
+    "overlay_path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\wifi_test\\calibration_runs\\2026-08-04-fisheye-10x7-15mm\\front_marker_axes.jpg",
+    "board_origin_px": [706, 346],
+    "board_plus_x_px": [714, 584],
+    "board_plus_y_px": [549, 352]
+  },
+  "warning": "Axis mapping validated with an asymmetric FRONT-side marker. Depth metric accuracy still requires plane/step validation before control.",
+  "overlay_path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\wifi_test\\calibration_runs\\2026-08-04-fisheye-10x7-15mm\\camera_to_board_axes.jpg"
+}

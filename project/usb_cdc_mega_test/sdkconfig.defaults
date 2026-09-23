@@ -1,0 +1,7 @@
+# P4-NANO bridge target, confirmed by COM5 flash_id.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# UART0 is exclusively a framed PC bridge. Do not emit application logs there.
+CONFIG_ESP_CONSOLE_NONE=y

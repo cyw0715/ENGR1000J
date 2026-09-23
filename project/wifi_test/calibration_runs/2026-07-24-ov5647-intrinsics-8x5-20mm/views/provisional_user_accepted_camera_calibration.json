@@ -1,0 +1,50 @@
+{
+  "status": "provisional_user_accepted",
+  "purpose": "PC-side OV5647 vision and terrain-estimation experiments only",
+  "not_for": [
+    "actuator control",
+    "landing-leg control",
+    "safety-critical metric terrain decisions without further validation"
+  ],
+  "user_decision": "User explicitly accepted use of the existing incomplete 25-view calibration set on 2026-07-24.",
+  "source_run": "2026-07-24-ov5647-intrinsics-8x5-20mm/views",
+  "source_audit_file": "calibration_audit.json",
+  "source_audit_sha256": "64ACE089BAEFB361D362B89B477777497DA96104C16DADBCEDED5E7459DD4561",
+  "source_view_count": 25,
+  "image_size_px": [800, 800],
+  "board": {
+    "squares": [9, 6],
+    "inner_corners": [8, 5],
+    "square_size_mm": 20.0
+  },
+  "camera_matrix": [
+    [2182.891044827313, 0.0, 628.6864885204191],
+    [0.0, 2181.8659543516324, 475.31069442714687],
+    [0.0, 0.0, 1.0]
+  ],
+  "distortion_coefficients_opencv_k1_k2_p1_p2_k3": [
+    -0.4728735598801693,
+    0.8448787776297085,
+    0.0015737759229586183,
+    -0.00671227635664616,
+    -2.946610274217683
+  ],
+  "fit_metrics": {
+    "opencv_rms": 1.3475422876350198,
+    "mean_per_view_reprojection_error_px": 0.1762434266002359,
+    "max_per_view_reprojection_error_px": 0.5763961553364689
+  },
+  "failed_quality_gates": {
+    "center_x_span_ge_0_40_width": false,
+    "at_least_4_near_frontal_le_15deg": false
+  },
+  "interpretation": {
+    "safe_use": [
+      "image undistortion experiments at 800x800",
+      "visualization",
+      "PC-side relative terrain-shape estimation",
+      "preliminary SR04-anchored metric-depth experiments with uncertainty reporting"
+    ],
+    "uncertainty": "Horizontal-edge behavior and principal-point/distortion estimates are weakly constrained because horizontal board-center coverage was insufficient. Recalibrate with targeted left/right near-frontal views before treating these intrinsics as production-quality."
+  }
+}

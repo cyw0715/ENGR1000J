@@ -1,0 +1,101 @@
+% Paste-ready content for the Phase 2 Report Template.
+% Requires: amsmath, amssymb, enumitem.
+
+\section{Solution: Terrain-Adaptive Four-Legged Mars Lander}
+
+\begin{enumerate}
+    \item \textbf{A four-corner adaptive landing platform} with one independently controlled linear actuator at each landing corner, allowing the support plane to be adjusted after touchdown on uneven terrain.
+    \item \textbf{A distributed sensing and control architecture} combining four VL53L1X position sensors, a TCA9548A multiplexer, an Arduino Mega 2560 real-time actuator controller, an ESP32-P4 communication gateway, a BNO085 IMU, an OV5647 camera, and an HC-SR04 range sensor.
+    \item \textbf{A completed Stage-1 terrain-elevation control mode} that converts a calibrated elevation map of the four landing-foot regions into coordinated differential leg-length targets.
+    \item \textbf{A mutually exclusive IMU attitude-control mode} that uses measured platform roll and pitch to generate coordinated differential leg corrections.
+    \item \textbf{A layered safety architecture} incorporating explicit arming, command ownership, local position feedback, sensor freshness checks, heartbeat supervision, STOP, ESTOP, travel limits, and all-output-low fault behavior.
+\end{enumerate}
+
+The proposed solution is a terrain-adaptive Mars landing platform intended to reduce post-touchdown tilt when the four landing feet contact terrain of unequal elevation. The platform is approximately $200\,\mathrm{mm}\times200\,\mathrm{mm}$, with one independently driven linear actuator at each corner. A rigid landing configuration transfers local terrain height differences directly into platform roll and pitch; consequently, it can degrade payload stability, camera pointing, and the available actuator travel margin. The proposed system instead treats the four leg positions as independently regulated variables and uses their coordinated motion to alter the support plane formed by the landing feet.
+
+The physical actuators are designated FL, FR, RL, and RR. Their mapping to the Mega controller is fixed as
+\[
+\mathrm{FL}\rightarrow A4,\qquad
+\mathrm{FR}\rightarrow A3,\qquad
+\mathrm{RL}\rightarrow A1,\qquad
+\mathrm{RR}\rightarrow A2.
+\]
+This mapping is essential because the geometric solver uses the order FL--FR--RL--RR whereas the electrical controller uses A1--A4. Each actuator has a dedicated VL53L1X time-of-flight sensor. The four equal-address sensors are isolated through a TCA9548A I$^2$C multiplexer, enabling the Mega to acquire independent position feedback for every leg. The verified direction convention is
+\[
+\text{EXTEND}\Rightarrow d_i\ \text{increases},
+\qquad
+\text{RETRACT}\Rightarrow d_i\ \text{decreases},
+\]
+where $d_i$ is the local VL53 coordinate of actuator $i$.
+
+For every requested target $d_{i,\mathrm{target}}$, the Mega calculates the local position error
+\[
+e_i=d_{i,\mathrm{target}}-d_{i,\mathrm{measured}}.
+\]
+A positive error commands extension and a negative error commands retraction. The actuator output is disabled after the target is reached within the specified tolerance. This local feedback loop is executed on the Mega rather than on the PC, so a delayed Wi-Fi packet, a frozen camera frame, or a Windows application failure cannot remove the fundamental position-feedback and stop functions. Direction reversal includes a $120\,\mathrm{ms}$ break-before-make interval, preventing opposing motor-drive states from being applied simultaneously.
+
+\subsection*{Stage-1 Elevation-Map Landing-Leg Control}
+
+Stage~1 implements the completed terrain-adaptive landing controller. The OV5647 fisheye camera provides an elevation map of the landing area, while the calibrated camera geometry projects the four predicted foot-contact regions into that map. The controller samples a robust local elevation $h_i$ for each foot region $i\in\{\mathrm{FL},\mathrm{FR},\mathrm{RL},\mathrm{RR}\}$. Invalid pixels, regions outside the valid depth field, and inconsistent local estimates are rejected before target generation. The HC-SR04 provides the global millimetre scale anchor for the reconstructed elevation field; it is not used as an independent per-leg height sensor.
+
+The controller removes the common elevation component so that it commands only support-plane compensation rather than an arbitrary collective translation. With
+\[
+\bar h=\frac{1}{4}\sum_{j=1}^{4}h_j,
+\qquad
+\Delta h_i=h_i-\bar h,
+\qquad
+\sum_{i=1}^{4}\Delta h_i=0,
+\]
+the required leg-length correction is generated as
+\[
+L_{i,\mathrm{target}}=L_{i,0}+k_h\Delta h_i,
+\]
+where $L_{i,0}$ is the established landing reference length and $k_h$ is the calibrated sign and scale factor relating terrain elevation to actuator length. Thus, a relative terrain-height change modifies the landing-leg configuration while preserving the mean commanded length. The Console and P4 remap the geometric order FL--FR--RL--RR to the fixed Mega order A4--A3--A1--A2 before sending the four targets to the common Mega position-control routine.
+
+Each candidate correction is constrained to the approved differential travel envelope $|\Delta L_i|\leq100\,\mathrm{mm}$. If a candidate would cross a leg travel boundary, all four differential corrections are reduced by one common scale factor rather than clipping individual legs. This preserves the intended support-plane orientation and the zero-sum condition. The Mega then closes the four local VL53L1X feedback loops independently; it stops each output on target, stale feedback, invalid feedback, timeout, STOP, or ESTOP. Consequently, the elevation map selects the coordinated target geometry, while the hardware-proven Mega loop remains responsible for final actuator positioning and non-motion safety.
+
+The Stage-1 result is a complete path from camera-derived terrain elevations to bounded four-leg target lengths. It compensates the relative elevation differences across the four foot regions and therefore reduces predicted post-touchdown roll and pitch without treating the absolute terrain range as an individual leg command.
+
+\subsection*{IMU Attitude-Control Solution}
+
+The second control owner is the IMU mode. It is mutually exclusive with Stage-1 elevation-map control: switching modes first issues STOP to the active owner, clears pending targets, and requires a new explicit ARM action. The BNO085 provides platform attitude. Its installation-frame transformation converts the sensor reading into platform roll and pitch, which are then used to generate coordinated differential leg corrections. The target condition is approximately
+\[
+|\phi_{\mathrm{platform}}|\leq1^\circ,
+\qquad
+|\theta_{\mathrm{platform}}|\leq1^\circ.
+\]
+
+IMU control changes opposing corners in opposite directions where appropriate, producing a change in support-plane orientation rather than an arbitrary common vertical displacement. The existing IMU pathway retains its validated outer attitude correction, inner position regulation, bounded target update rate, and Mega-side local safety checks. It is therefore an automatic leveling mode based on measured inertial state, complementary to the completed Stage-1 terrain-elevation controller.
+
+\subsection*{Safety and Communication Solution}
+
+The lander uses a layered authority model. The PC Console provides user interaction, status visualization, and high-level mode requests. The ESP32-P4 handles Wi-Fi, the camera and IMU interfaces, USB Host communication, and a single serialized command path to the Mega CH340 interface. The Mega remains the actuator safety authority. It implements the states \texttt{LOCKED}, \texttt{STAGE1\_ELEVATION}, \texttt{IMU\_ACTIVE}, \texttt{FAULT}, and \texttt{ESTOP}.
+
+In \texttt{LOCKED}, \texttt{FAULT}, and \texttt{ESTOP}, all motor enable and direction outputs are low. Host-owned sessions require a heartbeat; if no valid heartbeat arrives within two seconds, the Mega stops the outputs. Each VL53 reading must be valid and newer than the sensor freshness threshold. The controller also rejects targets above the $400\,\mathrm{mm}$ upper limit. STOP and ESTOP bypass normal motion authorization. Consequently, the proposed lander does not rely on correct PC software, continuous Wi-Fi, or valid computer vision to preserve a safe non-motion state.
+
+\section{Objectives}
+
+\textbf{Objective 1: Develop and validate the four-leg local position-feedback subsystem.}
+
+This objective is to implement deterministic position feedback for all four actuators using the Mega, the TCA9548A multiplexer, and four VL53L1X sensors. The subsystem must maintain the verified FL/FR/RL/RR-to-A4/A3/A1/A2 mapping, use the measured direction convention, perform independent feedback updates, and disable outputs when sensor data are invalid or stale. Achieving this objective provides the measurable foundation required for all subsequent Stage-1 elevation-map and IMU-based landing operations; without local position feedback, the system cannot verify whether a requested landing configuration has been reached.
+
+\textbf{Objective 2: Complete and validate Stage-1 elevation-map-based four-leg control.}
+
+This objective is to derive a robust relative terrain elevation for each of the four projected foot-contact regions from the calibrated camera elevation map, use the HC-SR04 only to anchor the map scale, remove the common elevation component, and generate the bounded zero-sum four-leg target vector. The mode must reject invalid foot regions, preserve $\sum_i\Delta L_i=0$, apply common-factor scaling at travel limits, and remain explicitly armed and mutually exclusive with the IMU owner. The benefit is a direct and auditable terrain-to-actuator pathway that compensates uneven touchdown geometry without turning absolute range or visually invalid depth into an unsafe individual-leg command.
+
+\textbf{Objective 3: Integrate the elevation-map target vector with the Mega position controller.}
+
+This objective is to map the geometric target order FL, FR, RL, and RR to Mega order A4, A3, A1, and A2, then send the four absolute targets through the P4 to the common Mega position-control pathway. The system must reject malformed, out-of-range, stale, or inconsistent requests and display actual leg feedback and controller state. This objective provides a repeatable, hardware-protected final stage for terrain adaptation while avoiding duplicate motor-control implementations.
+
+\textbf{Objective 4: Maintain a mutually exclusive IMU-based attitude-correction mode.}
+
+This objective is to preserve and verify the BNO085-based attitude-control pathway as a distinct owner that can reduce platform roll and pitch after touchdown. The mode must use the validated IMU installation transformation, bounded correction behavior, the existing PID structure, and the same Mega-side safety protections as Stage-1 elevation-map control. The benefit is an automatic post-touchdown leveling capability that can compensate for residual tilt, actuator tolerance, and small unmodeled terrain variations after a stable support configuration has been established.
+
+\textbf{Objective 5: Maintain the completed elevation-map terrain-adaptation pathway.}
+
+This objective is to maintain the calibrated fisheye model, camera-pose transformation, SR04 scale anchor, and measured plane/step validation that support Stage-1 elevation-map control. The terrain controller uses only relative four-foot elevation differences,
+\[
+\delta_i=L_i-\frac{1}{4}\sum_{j=1}^{4}L_j,
+\qquad \sum_i\delta_i=0,
+\]
+with common-factor scaling near travel boundaries. The benefit is a documented autonomous terrain-adaptation capability that converts calibrated relative elevations into physically bounded landing-leg compensation while retaining the Mega-side safety authority.

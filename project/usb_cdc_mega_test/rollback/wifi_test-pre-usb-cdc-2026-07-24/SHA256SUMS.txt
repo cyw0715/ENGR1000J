@@ -1,0 +1,3 @@
+5424dd790095feca0c869cb530bd02c4636fcf7bc4efaa0d6fafddc8189db2e1  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/wifi_test-pre-usb-cdc-2026-07-24/bootloader.bin
+7f00b6c042a89b15b0cac534f82ed988caf29278ff5700b0c511eb1b5bb7c820  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/wifi_test-pre-usb-cdc-2026-07-24/partition-table.bin
+5ed0c44b055501328d1b080f82c97f769811da7095aaf858e5cc06b2de5b2683  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/wifi_test-pre-usb-cdc-2026-07-24/wifi_test.bin

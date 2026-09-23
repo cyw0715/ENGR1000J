@@ -1,0 +1,960 @@
+/*
+ * Mars Lander - Camera + WiFi TCP + HTTP + IMU + Ultrasonic + Actuators
+ * 800x800 RGB565 → 灰度 → JPEG → WiFi → PC
+ * 三缓冲 + TCP + HTTP server
+ */
+
+#include <string.h>
+#include <math.h>
+#include <errno.h>
+#include <inttypes.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "freertos/event_groups.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "nvs_flash.h"
+#include "lwip/sockets.h"
+#include "esp_http_server.h"
+#include "camera.h"
+#include "imu.h"
+#include "ultrasonic.h"
+#include "actuator.h"
+#include "driver/jpeg_encode.h"
+
+static const char *TAG = "STREAM";
+
+#define WIFI_SSID      "MarsLander"
+#define WIFI_PASS      "mars2026"
+#define MAX_RETRY      10
+
+#define HTTP_PORT      80
+#define JPEG_QUALITY   50
+#define JPEG_BUF_SIZE  (300 * 1024)
+#define SW 800
+#define SH 800
+
+// HC-SR04: Trig GPIO25, Echo GPIO26. Echo must be at or below 3.3 V.
+#define ULTRASONIC_ENABLED 1
+
+static EventGroupHandle_t s_wifi_event_group;
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+static int s_retry_num = 0;
+
+
+static uint8_t *s_local_buf = NULL;
+static uint8_t *s_gray_a = NULL;
+static uint8_t *s_gray_b = NULL;
+static uint8_t *s_write_gray = NULL;
+static uint8_t *s_send_gray = NULL;
+static SemaphoreHandle_t s_frame_ready = NULL;
+static SemaphoreHandle_t s_buf_free = NULL;
+
+static jpeg_encoder_handle_t s_jpeg_enc = NULL;
+static uint8_t *s_jpeg_buf = NULL;
+static size_t s_jpeg_buf_sz = 0;
+
+static imu_data_t s_imu_data;
+static SemaphoreHandle_t s_imu_mutex = NULL;
+static int32_t s_distance_mm = -1;
+static SemaphoreHandle_t s_dist_mutex = NULL;
+static char s_ip_str[16] = "0.0.0.0";
+static int64_t s_boot_time = 0;
+#define VIDEO_META_RING_SIZE 128
+
+typedef struct {
+    uint32_t frame_id;
+    int64_t  timestamp_us;
+    size_t   jpeg_size;
+} video_meta_entry_t;
+
+static SemaphoreHandle_t s_video_meta_mutex = NULL;
+static video_meta_entry_t s_meta_ring[VIDEO_META_RING_SIZE];
+static uint32_t s_ring_head = 0;
+static uint32_t s_ring_count = 0;
+static int64_t s_jpeg_timestamp_us = 0;
+static uint32_t s_video_frame_id = 0;
+static size_t s_video_jpeg_size = 0;
+static bool s_video_meta_valid = false;
+
+typedef struct {
+    int64_t capture_us;
+    int64_t copy_us;
+    int64_t gray_us;
+} cap_timing_t;
+
+static cap_timing_t s_cap_timing;
+static SemaphoreHandle_t s_cap_timing_mutex = NULL;
+
+static void event_handler(void *arg, esp_event_base_t event_base,
+                          int32_t event_id, void *event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_retry_num < MAX_RETRY) {
+            esp_wifi_connect();
+            s_retry_num++;
+        } else {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+        snprintf(s_ip_str, sizeof(s_ip_str), IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "IP: %s", s_ip_str);
+        s_retry_num = 0;
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+}
+
+static void wifi_init_sta(void)
+{
+    s_wifi_event_group = xEventGroupCreate();
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_t inst_any, inst_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                    &event_handler, NULL, &inst_any));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                    &event_handler, NULL, &inst_ip));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = WIFI_SSID,
+            .password = WIFI_PASS,
+            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+        },
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "Connecting to %s...", WIFI_SSID);
+    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                        pdFALSE, pdFALSE, portMAX_DELAY);
+}
+
+#define PC_PORT        5000
+#define IMU_TCP_PORT   5001
+
+static int s_client_sock = -1;
+
+static bool send_all(int sock, const void *buf, size_t len)
+{
+    const uint8_t *p = (const uint8_t *)buf;
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(sock, p + sent, len - sent, 0);
+        if (n <= 0) {
+            ESP_LOGW(TAG, "send_all failed at %u/%u (n=%d)", (unsigned)sent, (unsigned)len, (int)n);
+            return false;
+        }
+        sent += n;
+    }
+    return true;
+}
+
+static void tcp_server_task(void *arg)
+{
+    struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(PC_PORT), .sin_addr.s_addr = htonl(INADDR_ANY) };
+    int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    bind(listen_sock, (struct sockaddr *)&addr, sizeof(addr));
+    listen(listen_sock, 1);
+    ESP_LOGI(TAG, "TCP port %d", PC_PORT);
+
+    while (1) {
+        struct sockaddr_in ca;
+        socklen_t cl = sizeof(ca);
+        int sock = accept(listen_sock, (struct sockaddr *)&ca, &cl);
+        if (sock >= 0) {
+            ESP_LOGI(TAG, "Client connected");
+            s_client_sock = sock;
+            int flag = 1;
+            setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+            char buf[16];
+            while (recv(sock, buf, sizeof(buf), 0) > 0) {}
+            close(sock);
+            s_client_sock = -1;
+        }
+    }
+}
+
+static void imu_tcp_server_task(void *arg)
+{
+    struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(IMU_TCP_PORT), .sin_addr.s_addr = htonl(INADDR_ANY) };
+    int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_sock < 0) {
+        ESP_LOGE("IMU_TCP", "socket create failed");
+        vTaskDelete(NULL);
+        return;
+    }
+    int opt = 1;
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    bind(listen_sock, (struct sockaddr *)&addr, sizeof(addr));
+    listen(listen_sock, 1);
+    ESP_LOGI(TAG, "IMU TCP stream on port %d (latest sample stream)", IMU_TCP_PORT);
+
+    while (1) {
+        struct sockaddr_in ca;
+        socklen_t cl = sizeof(ca);
+        int client = accept(listen_sock, (struct sockaddr *)&ca, &cl);
+        if (client < 0) continue;
+
+        ESP_LOGI("IMU_TCP", "client connected");
+        int flag = 1;
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+
+        int64_t last_sent_timestamp_us = 0;
+        while (1) {
+            // Latest-sample stream: publish every new valid sample without
+            // an artificial rate cap.  TCP backpressure remains handled by
+            // send_all() and a failed send disconnects the client.
+            imu_data_t sample;
+            esp_err_t sample_ret = imu_read(&sample);
+            if (sample_ret != ESP_OK || !sample.valid ||
+                sample.timestamp_us == last_sent_timestamp_us) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+            last_sent_timestamp_us = sample.timestamp_us;
+
+            imu_health_t health;
+            imu_get_health(&health);
+
+            char line[560];
+            int n = snprintf(line, sizeof(line),
+                "{\"timestamp_us\":%lld,\"index\":%u,"
+                "\"yaw\":%.2f,\"pitch\":%.2f,\"roll\":%.2f,"
+                "\"raw_accel_mg\":{\"x\":%d,\"y\":%d,\"z\":%d},"
+                "\"valid_packet_count\":%lu,\"checksum_error_count\":%lu,"
+                "\"uart_timeout_count\":%lu,"
+                "\"rx_overflow_count\":%lu,\"short_packet_count\":%lu,"
+                "\"bad_header_count\":%lu,\"sync_fail_count\":%lu,"
+                "\"rvc_header_count\":%lu,\"rvc_candidate_count\":%lu,"
+                "\"rvc_resync_replay_count\":%lu}\n",
+                (long long)sample.timestamp_us, (unsigned)sample.index,
+                sample.yaw, sample.pitch, sample.roll,
+                sample.raw_ax_mg, sample.raw_ay_mg, sample.raw_az_mg,
+                (unsigned long)health.valid_packet_count,
+                (unsigned long)health.checksum_error_count,
+                (unsigned long)health.uart_timeout_count,
+                (unsigned long)health.rx_overflow_count,
+                (unsigned long)health.short_packet_count,
+                (unsigned long)health.bad_header_count,
+                (unsigned long)health.sync_fail_count,
+                (unsigned long)health.rvc_header_count,
+                (unsigned long)health.rvc_candidate_count,
+                (unsigned long)health.rvc_resync_replay_count);
+
+            if (!send_all(client, line, n)) {
+                ESP_LOGW("IMU_TCP", "send failed, client disconnected");
+                break;
+            }
+        }
+
+        close(client);
+        ESP_LOGI("IMU_TCP", "client disconnected, waiting for new connection");
+    }
+}
+
+static void capture_task(void *arg)
+{
+    uint32_t fc = 0;
+    esp_log_level_set("*", ESP_LOG_INFO);
+    ESP_LOGI("CAP", "capture_task started on CPU%d", xPortGetCoreID());
+    while (1) {
+        size_t len = 0;
+        int64_t t_cap0 = esp_timer_get_time();
+        uint8_t *frame = camera_get_frame(&len, 5000);
+        int64_t t_cap1 = esp_timer_get_time();
+
+        if (frame && len > 0) {
+            if (xSemaphoreTake(s_buf_free, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                int64_t t_cp0 = esp_timer_get_time();
+                memcpy(s_local_buf, frame, SW * SH * 2);
+                int64_t t_cp1 = esp_timer_get_time();
+
+                uint16_t *src = (uint16_t *)s_local_buf;
+                for (int i = 0; i < SW * SH; i++) {
+                    uint16_t px = src[i];
+                    uint8_t r8 = ((px >> 11) & 0x1F) * 255 / 31;
+                    uint8_t g8 = ((px >> 5) & 0x3F) * 255 / 63;
+                    uint8_t b8 = (px & 0x1F) * 255 / 31;
+                    s_write_gray[i] = (uint8_t)((77 * r8 + 150 * g8 + 29 * b8) >> 8);
+                }
+                int64_t t_gray1 = esp_timer_get_time();
+
+                if (xSemaphoreTake(s_cap_timing_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                    s_cap_timing.capture_us = t_cap1 - t_cap0;
+                    s_cap_timing.copy_us = t_cp1 - t_cp0;
+                    s_cap_timing.gray_us = t_gray1 - t_cp1;
+                    xSemaphoreGive(s_cap_timing_mutex);
+                }
+
+                uint8_t *tmp = s_write_gray;
+                s_write_gray = s_send_gray;
+                s_send_gray = tmp;
+
+                xSemaphoreGive(s_frame_ready);
+                fc++;
+                if (fc <= 3 || fc % 20 == 0)
+                    ESP_LOGI("CAP", "frame %" PRIu32 " len=%u ready", fc, (unsigned)len);
+            } else {
+                ESP_LOGW("CAP", "buf_free timeout");
+            }
+        } else {
+            ESP_LOGW("CAP", "camera_get_frame NULL (len=%u)", (unsigned)len);
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+}
+
+static void ultrasonic_task(void *arg)
+{
+    // Keep the blocking echo pulse measurement off CPU1, which is reserved
+    // for the BNO085 UART ISR and parser.  This is a low-rate absolute-height
+    // reference, not a high-rate actuator-position sensor.
+    uint32_t sample_count = 0;
+    while (1) {
+        int32_t distance_mm = ultrasonic_read_mm();
+        if (xSemaphoreTake(s_dist_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            s_distance_mm = distance_mm;
+            xSemaphoreGive(s_dist_mutex);
+        }
+        // Low-rate wiring diagnostic: one line per second, never per 10 Hz
+        // measurement. A -1 result means no valid Echo pulse was observed.
+        if (++sample_count % 10 == 0) {
+            ESP_LOGI("USONIC", "sample=%" PRIu32 " distance_mm=%ld valid=%s status=%s",
+                     sample_count, (long)distance_mm,
+                     distance_mm >= 0 ? "true" : "false",
+                     ultrasonic_last_status());
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+static void imu_task(void *arg)
+{
+    int cnt = 0;
+    while (1) {
+        imu_data_t data;
+        esp_err_t ret = imu_read(&data);
+        if (ret == ESP_OK && data.valid) {
+            if (xSemaphoreTake(s_imu_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                s_imu_data = data;
+                xSemaphoreGive(s_imu_mutex);
+            }
+            if (cnt < 20) {
+                ESP_LOGI("IMU", "[%3u] YPR=[%+.2f %+.2f %+.2f] acc=[%d %d %d] mg ts=%lld",
+                         data.index, data.yaw, data.pitch, data.roll,
+                         data.raw_ax_mg, data.raw_ay_mg, data.raw_az_mg,
+                         (long long)data.timestamp_us);
+                cnt++;
+            }
+        } else if (cnt < 5) {
+            ESP_LOGW("IMU", "read ret=0x%x valid=%d", ret, data.valid);
+            cnt++;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+static esp_err_t json_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    imu_data_t imu;
+    int32_t dist;
+    if (xSemaphoreTake(s_imu_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        imu = s_imu_data;
+        xSemaphoreGive(s_imu_mutex);
+    } else {
+        memset(&imu, 0, sizeof(imu));
+    }
+    if (xSemaphoreTake(s_dist_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        dist = s_distance_mm;
+        xSemaphoreGive(s_dist_mutex);
+    } else {
+        dist = -1;
+    }
+
+    char buf[512];
+    int64_t vid_ts;
+    if (xSemaphoreTake(s_video_meta_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        vid_ts = s_jpeg_timestamp_us;
+        xSemaphoreGive(s_video_meta_mutex);
+    } else {
+        vid_ts = 0;
+    }
+    snprintf(buf, sizeof(buf),
+        "{\"attitude\":{\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f},"
+        "\"imu\":{\"valid\":%s,\"index\":%d,"
+        "\"raw_accel_mg\":{\"x\":%d,\"y\":%d,\"z\":%d},"
+        "\"timestamp_us\":%lld},"
+        "\"video\":{\"timestamp_us\":%lld},"
+        "\"ultrasonic\":{\"distance_mm\":%ld,\"valid\":%s}}",
+        imu.roll, imu.pitch, imu.yaw,
+        imu.valid ? "true" : "false", imu.index,
+        imu.raw_ax_mg, imu.raw_ay_mg, imu.raw_az_mg,
+        (long long)imu.timestamp_us,
+        (long long)vid_ts,
+        (long)dist, dist >= 0 ? "true" : "false");
+
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t attitude_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    imu_data_t imu;
+    if (xSemaphoreTake(s_imu_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        imu = s_imu_data;
+        xSemaphoreGive(s_imu_mutex);
+    } else {
+        memset(&imu, 0, sizeof(imu));
+    }
+
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        "{\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f,\"valid\":%s}",
+        imu.roll, imu.pitch, imu.yaw, imu.valid ? "true" : "false");
+
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t quaternion_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    imu_data_t imu;
+    if (xSemaphoreTake(s_imu_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        imu = s_imu_data;
+        xSemaphoreGive(s_imu_mutex);
+    } else {
+        memset(&imu, 0, sizeof(imu));
+    }
+
+    char buf[192];
+    snprintf(buf, sizeof(buf),
+        "{\"valid\":%s,\"index\":%d,\"timestamp_us\":%lld}",
+        imu.valid ? "true" : "false", imu.index,
+        (long long)imu.timestamp_us);
+
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t calibration_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    imu_data_t imu;
+    if (xSemaphoreTake(s_imu_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        imu = s_imu_data;
+        xSemaphoreGive(s_imu_mutex);
+    } else {
+        memset(&imu, 0, sizeof(imu));
+    }
+
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+        "{\"valid\":%s,\"index\":%d}",
+        imu.valid ? "true" : "false", imu.index);
+
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t temp_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    char buf[32];
+    snprintf(buf, sizeof(buf), "{\"temp\":0}");
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t board_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    int64_t uptime_s = (esp_timer_get_time() - s_boot_time) / 1000000;
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        "{\"board\":\"ESP32-P4\",\"ip\":\"%s\",\"uptime\":%lld}",
+        s_ip_str, (long long)uptime_s);
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t imu_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    imu_data_t imu;
+    if (xSemaphoreTake(s_imu_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        imu = s_imu_data;
+        xSemaphoreGive(s_imu_mutex);
+    } else {
+        memset(&imu, 0, sizeof(imu));
+    }
+
+    imu_health_t health;
+    imu_get_health(&health);
+
+    int64_t now_us = esp_timer_get_time();
+    int64_t sample_age_us = (health.last_valid_timestamp_us > 0)
+                            ? (now_us - health.last_valid_timestamp_us) : -1;
+
+    char buf[720];
+    snprintf(buf, sizeof(buf),
+        "{\"timestamp_us\":%lld,\"index\":%d,"
+        "\"yaw\":%.2f,\"pitch\":%.2f,\"roll\":%.2f,"
+        "\"raw_accel_mg\":{\"x\":%d,\"y\":%d,\"z\":%d},"
+        "\"valid\":%s,"
+        "\"valid_packet_count\":%lu,\"checksum_error_count\":%lu,"
+        "\"uart_timeout_count\":%lu,\"last_valid_timestamp_us\":%lld,"
+        "\"sample_age_us\":%lld,"
+        "\"rx_overflow_count\":%lu,\"short_packet_count\":%lu,"
+        "\"bad_header_count\":%lu,\"sync_fail_count\":%lu,"
+        "\"rvc_header_count\":%lu,\"rvc_candidate_count\":%lu,"
+        "\"rvc_resync_replay_count\":%lu}",
+        (long long)imu.timestamp_us, imu.index,
+        imu.yaw, imu.pitch, imu.roll,
+        imu.raw_ax_mg, imu.raw_ay_mg, imu.raw_az_mg,
+        imu.valid ? "true" : "false",
+        (unsigned long)health.valid_packet_count,
+        (unsigned long)health.checksum_error_count,
+        (unsigned long)health.uart_timeout_count,
+        (long long)health.last_valid_timestamp_us,
+        (long long)sample_age_us,
+        (unsigned long)health.rx_overflow_count,
+        (unsigned long)health.short_packet_count,
+        (unsigned long)health.bad_header_count,
+        (unsigned long)health.sync_fail_count,
+        (unsigned long)health.rvc_header_count,
+        (unsigned long)health.rvc_candidate_count,
+        (unsigned long)health.rvc_resync_replay_count);
+
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t video_meta_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    char qbuf[32] = {0};
+    char fval[16] = {0};
+    bool has_fid = false;
+    uint32_t req_fid = 0;
+
+    size_t qlen = httpd_req_get_url_query_len(req);
+    if (qlen > 0 && qlen < sizeof(qbuf)) {
+        if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK) {
+            if (httpd_query_key_value(qbuf, "frame_id", fval, sizeof(fval)) == ESP_OK) {
+                has_fid = true;
+                req_fid = (uint32_t)strtoul(fval, NULL, 10);
+            }
+        }
+    }
+
+    if (has_fid) {
+        bool found = false;
+        uint32_t fid = 0;
+        int64_t ts = 0;
+        size_t sz = 0;
+        if (xSemaphoreTake(s_video_meta_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            for (uint32_t i = 0; i < s_ring_count; i++) {
+                uint32_t idx = (s_ring_head + VIDEO_META_RING_SIZE - s_ring_count + i) % VIDEO_META_RING_SIZE;
+                if (s_meta_ring[idx].frame_id == req_fid) {
+                    fid = s_meta_ring[idx].frame_id;
+                    ts = s_meta_ring[idx].timestamp_us;
+                    sz = s_meta_ring[idx].jpeg_size;
+                    found = true;
+                    break;
+                }
+            }
+            xSemaphoreGive(s_video_meta_mutex);
+        }
+        char buf[128];
+        if (found) {
+            snprintf(buf, sizeof(buf),
+                "{\"frame_id\":%lu,\"timestamp_us\":%lld,\"jpeg_size\":%u,\"valid\":true}",
+                (unsigned long)fid, (long long)ts, (unsigned)sz);
+        } else {
+            snprintf(buf, sizeof(buf),
+                "{\"frame_id\":%lu,\"timestamp_us\":0,\"jpeg_size\":0,\"valid\":false}",
+                (unsigned long)req_fid);
+        }
+        return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+    }
+
+    uint32_t fid;
+    int64_t ts;
+    size_t sz;
+    bool valid;
+    if (xSemaphoreTake(s_video_meta_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        fid = s_video_frame_id;
+        ts = s_jpeg_timestamp_us;
+        sz = s_video_jpeg_size;
+        valid = s_video_meta_valid;
+        xSemaphoreGive(s_video_meta_mutex);
+    } else {
+        fid = 0; ts = 0; sz = 0; valid = false;
+    }
+
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+        "{\"frame_id\":%lu,\"timestamp_us\":%lld,\"jpeg_size\":%u,\"valid\":%s}",
+        (unsigned long)fid, (long long)ts, (unsigned)sz,
+        valid ? "true" : "false");
+
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t camera_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+        "{\"width\":%d,\"height\":%d,\"fps\":0}", SW, SH);
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t ip_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{\"ip\":\"%s\"}", s_ip_str);
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t uptime_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    int64_t uptime_s = (esp_timer_get_time() - s_boot_time) / 1000000;
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{\"uptime\":%lld}", (long long)uptime_s);
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t cmd_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    char buf[512];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty body");
+        return ESP_FAIL;
+    }
+    buf[len] = '\0';
+
+    char resp[128];
+
+    if (strstr(buf, "\"all\"")) {
+        int fl = 300, fr = 300, rl = 300, rr = 300;
+        sscanf(buf, "{\"all\":%d}", &fl);
+        fr = fl; rl = fl; rr = fl;
+
+        char *p;
+        if ((p = strstr(buf, "\"fl\""))) sscanf(p, "\"fl\":%d", &fl);
+        if ((p = strstr(buf, "\"fr\""))) sscanf(p, "\"fr\":%d", &fr);
+        if ((p = strstr(buf, "\"rl\""))) sscanf(p, "\"rl\":%d", &rl);
+        if ((p = strstr(buf, "\"rr\""))) sscanf(p, "\"rr\":%d", &rr);
+
+        actuator_set_length(ACT_FL, fl);
+        actuator_set_length(ACT_FR, fr);
+        actuator_set_length(ACT_RL, rl);
+        actuator_set_length(ACT_RR, rr);
+
+        snprintf(resp, sizeof(resp),
+            "{\"ok\":true,\"fl\":%d,\"fr\":%d,\"rl\":%d,\"rr\":%d}", fl, fr, rl, rr);
+    } else if (strstr(buf, "\"stop\"")) {
+        actuator_stop_all();
+        snprintf(resp, sizeof(resp), "{\"ok\":true,\"stop\":true}");
+    } else {
+        int id = -1, len_mm = 300;
+        if (strstr(buf, "\"id\"") && strstr(buf, "\"length\"")) {
+            sscanf(buf, "{\"id\":%d,\"length\":%d", &id, &len_mm);
+            if (id >= 0 && id < ACT_COUNT) {
+                esp_err_t ret = actuator_set_length((actuator_id_t)id, len_mm);
+                snprintf(resp, sizeof(resp), "{\"ok\":%s,\"id\":%d,\"length\":%d}",
+                         ret == ESP_OK ? "true" : "false", id, len_mm);
+            } else {
+                snprintf(resp, sizeof(resp), "{\"ok\":false,\"error\":\"invalid id\"}");
+            }
+        } else {
+            snprintf(resp, sizeof(resp), "{\"ok\":false,\"error\":\"unknown cmd\"}");
+        }
+    }
+
+    return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+}
+
+static httpd_handle_t start_http_server(void)
+{
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = HTTP_PORT;
+    config.stack_size = 8192;
+    config.max_uri_handlers = 16;
+
+    httpd_handle_t server = NULL;
+    if (httpd_start(&server, &config) != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP server start failed");
+        return NULL;
+    }
+
+    httpd_uri_t uri_json =       { .uri = "/json",       .method = HTTP_GET,  .handler = json_handler };
+    httpd_uri_t uri_attitude =   { .uri = "/attitude",   .method = HTTP_GET,  .handler = attitude_handler };
+    httpd_uri_t uri_quaternion = { .uri = "/quaternion",  .method = HTTP_GET,  .handler = quaternion_handler };
+    httpd_uri_t uri_calibration ={ .uri = "/calibration", .method = HTTP_GET,  .handler = calibration_handler };
+    httpd_uri_t uri_temp =       { .uri = "/temp",       .method = HTTP_GET,  .handler = temp_handler };
+    httpd_uri_t uri_valid =      { .uri = "/valid",      .method = HTTP_GET,  .handler = calibration_handler };
+    httpd_uri_t uri_ts =         { .uri = "/ts",         .method = HTTP_GET,  .handler = quaternion_handler };
+    httpd_uri_t uri_board =      { .uri = "/board",      .method = HTTP_GET,  .handler = board_handler };
+    httpd_uri_t uri_imu_ep =     { .uri = "/imu",        .method = HTTP_GET,  .handler = imu_handler };
+    httpd_uri_t uri_camera =     { .uri = "/camera",     .method = HTTP_GET,  .handler = camera_handler };
+    httpd_uri_t uri_ip =         { .uri = "/ip",         .method = HTTP_GET,  .handler = ip_handler };
+    httpd_uri_t uri_uptime =     { .uri = "/uptime",     .method = HTTP_GET,  .handler = uptime_handler };
+    httpd_uri_t uri_cmd =        { .uri = "/cmd",        .method = HTTP_POST, .handler = cmd_handler };
+    httpd_uri_t uri_video_meta = { .uri = "/video_meta", .method = HTTP_GET,  .handler = video_meta_handler };
+
+    httpd_register_uri_handler(server, &uri_json);
+    httpd_register_uri_handler(server, &uri_attitude);
+    httpd_register_uri_handler(server, &uri_quaternion);
+    httpd_register_uri_handler(server, &uri_calibration);
+    httpd_register_uri_handler(server, &uri_temp);
+    httpd_register_uri_handler(server, &uri_valid);
+    httpd_register_uri_handler(server, &uri_ts);
+    httpd_register_uri_handler(server, &uri_board);
+    httpd_register_uri_handler(server, &uri_imu_ep);
+    httpd_register_uri_handler(server, &uri_camera);
+    httpd_register_uri_handler(server, &uri_ip);
+    httpd_register_uri_handler(server, &uri_uptime);
+    httpd_register_uri_handler(server, &uri_cmd);
+    httpd_register_uri_handler(server, &uri_video_meta);
+
+    ESP_LOGI(TAG, "HTTP server on port %d", HTTP_PORT);
+    return server;
+}
+
+void app_main(void)
+{
+    s_boot_time = esp_timer_get_time();
+    ESP_LOGI(TAG, "Mars Lander - Camera + WiFi + IMU UART-RVC + Act");
+    ESP_LOGI(TAG, "  Video TCP: port %d (4B LE len + JPEG)", PC_PORT);
+    ESP_LOGI(TAG, "  IMU  TCP:  port %d (JSONL latest sample stream)", IMU_TCP_PORT);
+    ESP_LOGI(TAG, "  IMU  HTTP: GET /imu  (diagnostic latest endpoint)");
+    ESP_LOGI(TAG, "  UART-RVC:  UART%d RX=GPIO%d, %d baud, 19-byte frames",
+             1, 3, 115200);
+    ESP_LOGI(TAG, "  Timestamps: esp_timer_get_time() us since boot");
+
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    // UART-RVC must begin consuming its continuous 100 Hz stream before slow
+    // WiFi/camera bring-up. This mirrors the proven standalone imu_test path.
+    s_imu_mutex = xSemaphoreCreateMutex();
+    if (!s_imu_mutex) {
+        ESP_LOGE(TAG, "IMU mutex allocation failed");
+        return;
+    }
+    ret = imu_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "IMU init failed: 0x%x (continuing without IMU)", ret);
+    }
+
+    wifi_init_sta();
+    ESP_LOGI(TAG, "WiFi OK");
+
+    ret = camera_init();
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "Camera fail: 0x%x", ret); while(1) vTaskDelay(1000); }
+    camera_start();
+    ESP_LOGI(TAG, "Camera %dx%d", SW, SH);
+
+    s_dist_mutex = xSemaphoreCreateMutex();
+    s_video_meta_mutex = xSemaphoreCreateMutex();
+    s_cap_timing_mutex = xSemaphoreCreateMutex();
+    if (!s_dist_mutex || !s_video_meta_mutex || !s_cap_timing_mutex) {
+        ESP_LOGE(TAG, "Shared mutex allocation failed");
+        return;
+    }
+
+    bool ultrasonic_ready = false;
+#if ULTRASONIC_ENABLED
+    ultrasonic_ready = (ultrasonic_init() == ESP_OK);
+    if (!ultrasonic_ready) {
+        ESP_LOGW(TAG, "Ultrasonic init failed (continuing without height reference)");
+    } else {
+        ESP_LOGI(TAG, "Ultrasonic enabled: HC-SR04 Trig=GPIO25 Echo=GPIO26");
+    }
+#else
+    ESP_LOGI(TAG, "Ultrasonic disabled");
+#endif
+
+    ret = actuator_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Actuator init failed: 0x%x (continuing without actuators)", ret);
+    }
+
+    s_local_buf = heap_caps_aligned_alloc(64, SW * SH * 2, MALLOC_CAP_SPIRAM);
+    s_gray_a = heap_caps_aligned_alloc(64, SW * SH, MALLOC_CAP_SPIRAM);
+    s_gray_b = heap_caps_aligned_alloc(64, SW * SH, MALLOC_CAP_SPIRAM);
+    s_write_gray = s_gray_a;
+    s_send_gray = s_gray_b;
+    s_frame_ready = xSemaphoreCreateBinary();
+    s_buf_free = xSemaphoreCreateBinary();
+    xSemaphoreGive(s_buf_free);
+
+    jpeg_encode_engine_cfg_t jeng = {.intr_priority = 0, .timeout_ms = 1000};
+    jpeg_new_encoder_engine(&jeng, &s_jpeg_enc);
+    jpeg_encode_memory_alloc_cfg_t jmem = {.buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER};
+    s_jpeg_buf = (uint8_t *)jpeg_alloc_encoder_mem(JPEG_BUF_SIZE, &jmem, &s_jpeg_buf_sz);
+
+    ESP_LOGI(TAG, "Buffers ready");
+
+    // Keep the 87 ms RGB565→gray workload off CPU1: CPU1 is reserved for
+    // the BNO085 UART ISR and high-priority parser.  The main JPEG/TCP loop
+    // already runs on CPU0, so pin capture conversion to CPU0 as well rather
+    // than starving UART reception during active video streaming.
+    // Low-rate height reference task stays on CPU0; CPU1 remains reserved for
+    // the UART-RVC ISR/parser.
+    if (ultrasonic_ready)             xTaskCreatePinnedToCore(ultrasonic_task, "ultra", 3072, NULL, 2, NULL, 0);
+    xTaskCreatePinnedToCore(capture_task, "cap", 8192, NULL, 5, NULL, 0);
+    xTaskCreate(tcp_server_task, "tcp", 4096, NULL, 3, NULL);
+    if (imu_is_ready())       xTaskCreate(imu_task, "imu", 8192, NULL, 4, NULL);
+    // Priority 9 stays below the UART parser (10) but ahead of normal video
+    // work, so the 10 Hz latest-sample JSON sender is not starved by load.
+    if (imu_is_ready())       xTaskCreatePinnedToCore(imu_tcp_server_task, "imu_tcp", 4096, NULL, 9, NULL, 1);
+
+    start_http_server();
+
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    // esp_log_level_set("*", ESP_LOG_NONE);  // 调试: 保持日志开启
+
+    jpeg_encode_cfg_t enc_cfg = {
+        .width = SW, .height = SH,
+        .src_type = JPEG_ENCODE_IN_FORMAT_GRAY,
+        .sub_sample = JPEG_DOWN_SAMPLING_GRAY,
+        .image_quality = JPEG_QUALITY,
+    };
+
+    uint32_t fc = 0;
+    uint32_t perf_count = 0;
+    uint32_t perf_timing_samples = 0;
+    uint32_t perf_timing_missed = 0;
+    int64_t perf_t0 = esp_timer_get_time();
+    int64_t acc_cap = 0, acc_cp = 0, acc_gray = 0, acc_enc = 0, acc_send = 0;
+
+    while (1) {
+        if (xSemaphoreTake(s_frame_ready, pdMS_TO_TICKS(5000)) == pdTRUE) {
+            int64_t t_enc0 = esp_timer_get_time();
+            uint32_t jpeg_size = 0;
+            esp_err_t enc_ret = jpeg_encoder_process(s_jpeg_enc, &enc_cfg,
+                                    s_send_gray, SW * SH,
+                                    s_jpeg_buf, s_jpeg_buf_sz, &jpeg_size);
+            int64_t t_enc1 = esp_timer_get_time();
+
+            xSemaphoreGive(s_buf_free);
+
+            bool sent = false;
+            int64_t send_us = 0;
+
+            if (enc_ret == ESP_OK && jpeg_size > 0 && s_client_sock >= 0) {
+                int64_t t_send0 = esp_timer_get_time();
+                uint32_t len_le = jpeg_size;
+                bool ok = send_all(s_client_sock, &len_le, 4);
+                if (ok) ok = send_all(s_client_sock, s_jpeg_buf, jpeg_size);
+                int64_t t_send1 = esp_timer_get_time();
+
+                if (!ok) {
+                    close(s_client_sock);
+                    s_client_sock = -1;
+                } else {
+                    sent = true;
+                    send_us = t_send1 - t_send0;
+                    int64_t ts = esp_timer_get_time();
+                    if (xSemaphoreTake(s_video_meta_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                        s_video_frame_id++;
+                        s_jpeg_timestamp_us = ts;
+                        s_video_jpeg_size = jpeg_size;
+                        s_video_meta_valid = true;
+                        uint32_t idx = s_ring_head;
+                        s_meta_ring[idx].frame_id = s_video_frame_id;
+                        s_meta_ring[idx].timestamp_us = ts;
+                        s_meta_ring[idx].jpeg_size = jpeg_size;
+                        s_ring_head = (s_ring_head + 1) % VIDEO_META_RING_SIZE;
+                        if (s_ring_count < VIDEO_META_RING_SIZE) s_ring_count++;
+                        xSemaphoreGive(s_video_meta_mutex);
+                    }
+                }
+            }
+
+            fc++;
+            if (enc_ret == ESP_OK && jpeg_size > 0) {
+                cap_timing_t timing_snap;
+                if (xSemaphoreTake(s_cap_timing_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                    timing_snap = s_cap_timing;
+                    xSemaphoreGive(s_cap_timing_mutex);
+                    acc_cap += timing_snap.capture_us;
+                    acc_cp += timing_snap.copy_us;
+                    acc_gray += timing_snap.gray_us;
+                    perf_timing_samples++;
+                } else {
+                    perf_timing_missed++;
+                }
+                acc_enc += (t_enc1 - t_enc0);
+                acc_send += send_us;
+                perf_count++;
+
+                if (perf_count >= 20) {
+                    int64_t now = esp_timer_get_time();
+                    float fps = perf_count * 1000000.0f / (now - perf_t0);
+                    int64_t avg_cap = perf_timing_samples ? acc_cap / perf_timing_samples / 1000 : 0;
+                    int64_t avg_cp = perf_timing_samples ? acc_cp / perf_timing_samples / 1000 : 0;
+                    int64_t avg_gray = perf_timing_samples ? acc_gray / perf_timing_samples / 1000 : 0;
+                    int64_t avg_pipe = perf_timing_samples ? (acc_cap + acc_cp + acc_gray) / perf_timing_samples / 1000 : 0;
+                    ESP_LOGI(TAG, "PERF[%" PRIu32 "] fps=%.1f timing_samples=%" PRIu32 " timing_missed=%" PRIu32 " capture=%lld copy=%lld gray=%lld pipeline_total=%lld encode=%lld send=%lld sent=%s",
+                        fc, fps, perf_timing_samples, perf_timing_missed,
+                        (long long)avg_cap,
+                        (long long)avg_cp,
+                        (long long)avg_gray,
+                        (long long)avg_pipe,
+                        (long long)(acc_enc / perf_count / 1000),
+                        (long long)(acc_send / perf_count / 1000),
+                        sent ? "true" : "false");
+                    perf_count = 0;
+                    perf_timing_samples = 0;
+                    perf_timing_missed = 0;
+                    acc_cap = 0; acc_cp = 0; acc_gray = 0; acc_enc = 0; acc_send = 0;
+                    perf_t0 = now;
+                }
+            }
+        }
+    }
+}

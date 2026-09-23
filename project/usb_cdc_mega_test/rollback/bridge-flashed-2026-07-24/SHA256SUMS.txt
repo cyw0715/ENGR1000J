@@ -1,0 +1,2 @@
+b0615b1849696d7fce691421e4d8425a09b1442183b4071d932cdbc0e21a1de3  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/bridge-flashed-2026-07-24/main.c.before-usb-enum-diagnostic.c
+afe54111dee80970e5630bbc0945607ec35c9db99ea7cde95274a948f59f1e90  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/bridge-flashed-2026-07-24/usb_cdc_mega_test.pre-enum-diagnostic.bin

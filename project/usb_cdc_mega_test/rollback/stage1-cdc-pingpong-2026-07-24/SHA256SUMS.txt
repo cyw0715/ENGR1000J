@@ -1,0 +1,6 @@
+36aff26261dbf86c9ac796664ea2228022e92f3a35bad9e7d416701a1b70f8dc  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/stage1-cdc-pingpong-2026-07-24/bootloader.bin
+5b2fca731bd18e648bf07b44e3bd561be7b46dab317193865731cbab7caa5a97  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/stage1-cdc-pingpong-2026-07-24/dependencies.lock
+ada99e04aff51d12e488497f1edd3efe15616062ed0fca3b8f06debcf9ce1415  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/stage1-cdc-pingpong-2026-07-24/idf_component.yml
+fcad1f5897c973eb567b5005ba9460c1b96f028202434d364c71306698e54b8b  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/stage1-cdc-pingpong-2026-07-24/main.c
+7f00b6c042a89b15b0cac534f82ed988caf29278ff5700b0c511eb1b5bb7c820  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/stage1-cdc-pingpong-2026-07-24/partition-table.bin
+1787a969bd5a045f73d0e13593e46b4ef41da9d83e3c466733bdbaa6366b3fb8  /mnt/e/Chenyuewei/University/Freshman/summer/ENGR1000/p2/project/usb_cdc_mega_test/rollback/stage1-cdc-pingpong-2026-07-24/usb_cdc_mega_test.bin

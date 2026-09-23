@@ -1,0 +1,2 @@
+https://github.com/madsci1016/Arduino-PS2X
+commit=b4a7f3c6691301c3bbf5f0c2f82662d23fec8aa2

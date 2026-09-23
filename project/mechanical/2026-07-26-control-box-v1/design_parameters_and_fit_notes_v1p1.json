@@ -1,0 +1,64 @@
+{
+  "design_name": "Mars lander control box v1",
+  "units": "mm",
+  "envelope": {
+    "external_x": 220,
+    "external_y": 135,
+    "base_height": 40,
+    "lid_height": 15,
+    "wall_thickness": 3
+  },
+  "module_placement": {
+    "Arduino_Mega_2560": {
+      "reserved_footprint_mm": [
+        102,
+        54
+      ],
+      "retention": "4 locating pegs plus floor cable-tie slots; verify clone hole pattern before final print"
+    },
+    "ESP32_P4_NANO": {
+      "reserved_footprint_mm": [
+        50,
+        50
+      ],
+      "retention": "4 locating pegs at 45.1x45.09 pitch based on Waveshare mechanical drawing"
+    },
+    "OV5647": {
+      "retention": "camera service clearance in lid plus base strap/rail; exact clone PCB holes not inferred from photo",
+      "lens_opening_diameter_mm": 18
+    },
+    "HC_SR04": {
+      "retention": "rail/strap; two lid acoustic openings, 18.5 diameter at 26 pitch",
+      "note": "photograph shows sensor rotated so transducers are vertically arranged in image"
+    }
+  },
+  "critical_print_notes": [
+    "Print base with floor on bed; print lid with exterior top on bed or use supports for its locating rim.",
+    "Use PETG/ABS rather than PLA if the enclosure will see sun or motor heat.",
+    "Before drilling/printing final revision, test fit actual Mega clone, OV5647 and HC-SR04; their mounting holes differ by seller.",
+    "HC-SR04 and camera must face the intended terrain direction; the cover can be mounted with that sensor face downward if required by the lander architecture.",
+    "Do not block ESP32-P4 USB-OTG/USB-C/RJ45 or the OV5647 FFC bend region; enlarge/add side cutouts after checking your final cable set."
+  ],
+  "parameters": {
+    "outer_x": 220.0,
+    "outer_y": 135.0,
+    "base_floor": 3.0,
+    "base_wall": 3.0,
+    "base_wall_h": 37.0,
+    "lid_top": 3.0,
+    "lid_lip_h": 12.0,
+    "lid_lip_t": 2.0,
+    "corner_boss_od": 10.0,
+    "corner_pilot_d": 2.7,
+    "lid_clear_d": 3.6,
+    "standoff_peg_d": 3.2,
+    "standoff_h": 7.0,
+    "camera_lens_d": 18.0,
+    "camera_clear_x": 34.0,
+    "camera_clear_y": 30.0,
+    "sr04_d": 18.5,
+    "sr04_pitch": 26.0,
+    "sr04_clear_x": 58.0,
+    "sr04_clear_y": 34.0
+  }
+}

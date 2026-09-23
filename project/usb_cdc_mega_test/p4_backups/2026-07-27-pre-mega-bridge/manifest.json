@@ -1,0 +1,27 @@
+﻿{
+    "created":  "2026-07-27T21:54:15.1328924+08:00",
+    "files":  [
+                  {
+                      "Name":  "bootloader.bin",
+                      "Length":  23280,
+                      "LastWriteTime":  "\/Date(1784705065199)\/"
+                  },
+                  {
+                      "Name":  "flasher_args.json",
+                      "Length":  941,
+                      "LastWriteTime":  "\/Date(1784705041803)\/"
+                  },
+                  {
+                      "Name":  "partition-table.bin",
+                      "Length":  3072,
+                      "LastWriteTime":  "\/Date(1784705043735)\/"
+                  },
+                  {
+                      "Name":  "wifi_test.bin",
+                      "Length":  820736,
+                      "LastWriteTime":  "\/Date(1784895763829)\/"
+                  }
+              ],
+    "purpose":  "Pre-bridge P4 wifi_test restore set before Mega controller test",
+    "target":  "ESP32-P4 COM5"
+}

@@ -1,0 +1,51 @@
+dependencies:
+  espressif/cmake_utilities:
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.5.3
+  espressif/esp_cam_sensor:
+    dependencies:
+    - name: espressif/cmake_utilities
+      version: 0.*
+    - name: espressif/esp_sccb_intf
+      version: '>=0.0.5'
+    - name: idf
+      version: '>=5.3'
+    source:
+      path: E:\Chenyuewei\University\Freshman\summer\ENGR1000\p2\project\wifi_test\components\esp_cam_sensor
+      type: local
+    targets:
+    - esp32p4
+    - esp32s3
+    - esp32c3
+    - esp32c5
+    - esp32c6
+    - esp32c61
+    - esp32s31
+    version: 2.3.0
+  espressif/esp_sccb_intf:
+    dependencies:
+    - name: idf
+      version: '>=5.3'
+    source:
+      path: E:\Chenyuewei\University\Freshman\summer\ENGR1000\p2\project\wifi_test\managed_components\espressif__esp_sccb_intf
+      type: local
+    version: 0.0.8
+  idf:
+    source:
+      type: idf
+    version: 5.4.1
+direct_dependencies:
+- espressif/cmake_utilities
+- espressif/esp_cam_sensor
+- espressif/esp_sccb_intf
+- idf
+manifest_hash: 30d14935d890abdf174cae4c39cf53e4eb3d56bccb5a40c9455a0d782df8c047
+target: esp32p4
+version: 2.0.0

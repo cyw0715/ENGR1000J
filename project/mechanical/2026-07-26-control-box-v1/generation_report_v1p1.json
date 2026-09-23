@@ -1,0 +1,101 @@
+{
+  "status": "pass",
+  "output_dir": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1",
+  "files": {
+    "parameters": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\design_parameters_and_fit_notes_v1p1.json",
+      "size_bytes": 2254
+    },
+    "base_sldprt": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\mars_lander_control_box_base_v1p1.SLDPRT",
+      "ok": true,
+      "errors": 0,
+      "warnings": 0,
+      "size_bytes": 201026
+    },
+    "base_step": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\mars_lander_control_box_base_v1p1.step",
+      "size_bytes": 226430,
+      "errors": 0,
+      "warnings": 0
+    },
+    "base_stl": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\mars_lander_control_box_base_v1p1.stl",
+      "size_bytes": 149234,
+      "errors": 0,
+      "warnings": 0
+    },
+    "lid_sldprt": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\mars_lander_control_box_lid_v1p1.SLDPRT",
+      "ok": true,
+      "errors": 0,
+      "warnings": 0,
+      "size_bytes": 159959
+    },
+    "lid_step": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\mars_lander_control_box_lid_v1p1.step",
+      "size_bytes": 139672,
+      "errors": 0,
+      "warnings": 0
+    },
+    "lid_stl": {
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\mars_lander_control_box_lid_v1p1.stl",
+      "size_bytes": 79734,
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "previews": [
+    {
+      "part": "base",
+      "view": "isometric",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\base_isometric.bmp",
+      "size_bytes": 4800054
+    },
+    {
+      "part": "base",
+      "view": "top",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\base_top.bmp",
+      "size_bytes": 4800054
+    },
+    {
+      "part": "base",
+      "view": "front",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\base_front.bmp",
+      "size_bytes": 4800054
+    },
+    {
+      "part": "base",
+      "view": "right",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\base_right.bmp",
+      "size_bytes": 4800054
+    },
+    {
+      "part": "lid",
+      "view": "isometric",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\lid_isometric.bmp",
+      "size_bytes": 4800054
+    },
+    {
+      "part": "lid",
+      "view": "top",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\lid_top.bmp",
+      "size_bytes": 4800054
+    },
+    {
+      "part": "lid",
+      "view": "front",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\lid_front.bmp",
+      "size_bytes": 4800054
+    },
+    {
+      "part": "lid",
+      "view": "right",
+      "path": "E:\\Chenyuewei\\University\\Freshman\\summer\\ENGR1000\\p2\\project\\mechanical\\2026-07-26-control-box-v1\\lid_right.bmp",
+      "size_bytes": 4800054
+    }
+  ],
+  "solidworks_connection": "started_new_instance",
+  "solidworks_revision": "30.5.0",
+  "template": "C:\\ProgramData\\SolidWorks\\SOLIDWORKS 2022\\templates\\gb_part.prtdot"
+}
